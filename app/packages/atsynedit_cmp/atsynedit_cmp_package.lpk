@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <Name Value="atsynedit_cmp_package"/>
+    <Type Value="RunTimeOnly"/>
+    <Author Value="Alexey Torgashin"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <SearchPaths>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Description Value="Auto-completion for ATSynEdit. General form with listbox, and helpers for: HTML, CSS, file:///, CudaText acp files."/>
+    <License Value="MPL 2.0, LGPL"/>
+    <Version Major="2"/>
+    <Files Count="8">
+      <Item1>
+        <Filename Value="atsynedit_cmp_filenames.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_Filenames"/>
+      </Item1>
+      <Item2>
+        <Filename Value="atsynedit_cmp_acpfiles.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_AcpFiles"/>
+      </Item2>
+      <Item3>
+        <Filename Value="atsynedit_cmp_css.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_CSS"/>
+      </Item3>
+      <Item4>
+        <Filename Value="atsynedit_cmp_html.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_HTML"/>
+      </Item4>
+      <Item5>
+        <Filename Value="atsynedit_cmp_form.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_Form"/>
+      </Item5>
+      <Item6>
+        <Filename Value="atsynedit_cmp_fileuri.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_FileURI"/>
+      </Item6>
+      <Item7>
+        <Filename Value="atsynedit_cmp_css_provider.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_CSS_Provider"/>
+      </Item7>
+      <Item8>
+        <Filename Value="atsynedit_cmp_html_provider.pas"/>
+        <UnitName Value="ATSynEdit_Cmp_HTML_Provider"/>
+      </Item8>
+    </Files>
+    <CompatibilityMode Value="True"/>
+    <RequiredPkgs Count="2">
+      <Item1>
+        <PackageName Value="atsynedit_package"/>
+      </Item1>
+      <Item2>
+        <PackageName Value="FCL"/>
+      </Item2>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>

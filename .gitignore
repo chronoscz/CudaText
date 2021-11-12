@@ -31,6 +31,7 @@ _test/
 /app/builds
 /app/cudatext
 /app/cudatext-mac
+/app/cudatext.res
 treehelpertester/app
 app.res
 
