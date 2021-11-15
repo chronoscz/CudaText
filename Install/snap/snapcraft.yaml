@@ -1,0 +1,109 @@
+name: cudatext
+title: CudaText
+version: '1.148.5.0'
+summary: Open source and cross-platform text editor.
+description: |
+  CudaText is a cross-platform text editor, written in Object Pascal. It is open source project and can be used free of charge, even for business. It starts quite fast: ~0.3 sec with ~30 plugins, on Linux on CPU Intel Core i3 3GHz. It is extensible by Python add-ons: plugins, linters, code tree parsers, external tools. Syntax parser is feature-rich, from EControl engine.
+  
+  Features
+  * Syntax highlight for lot of languages (270+ lexers).
+  * Code tree: structure of functions/classes/etc, if lexer allows it.
+  * Code folding.
+  * Multi-carets and multi-selections.
+  * Find/Replace with regular expressions.
+  * Configs in JSON format. Including lexer-specific configs.
+  * Tabbed UI.
+  * Split view to primary/secondary. Split window to 2/3/4/6 groups of tabs.
+  * Command palette, with fuzzy matching.
+  * Minimap. Micromap.
+  * Show unprinted whitespace.
+  * Support for many encodings.
+  * Customizable hotkeys.
+  * Binary/Hex viewer for files of unlimited size (can show 10 Gb logs).
+  * Correctly saves binary files.
+
+  Features for HTML/CSS coding
+  * Smart auto-completion for HTML, CSS.
+  * HTML tags completion with Tab-key (Snippets plugin).
+  * HTML color codes (#rgb, #rrggbb) underline.
+  * Show pictures inside editor area (jpeg/png/gif/bmp/ico).
+  * Show tooltip when mouse moves over picture tag, entity, color value.
+
+  Features implemented as plugins
+  * Addons manager
+  * Find in files
+  * Snippets
+  * LSP protocol support
+  * External tools
+  * Project manager
+  * Session manager
+  * Macro manager
+  * Spell checker
+  * FTP panel
+  * Highlight all occurrences
+  * Color picker
+  * Insert date/time
+  * Linters support (CudaLint)
+  * Formatters for HTML/CSS/JS/XML/... (CudaFormatter)
+  * Creating backup files
+  * Menu configurator
+  * and more...
+confinement: strict
+base: core20
+grade: stable
+icon: "Install/snap/local/CudaText.png"
+license: NLPL
+
+parts:
+  lazarus:
+    plugin: nil
+    source: .
+    source-type: local
+    build-packages: 
+    - wget
+    - libgtk2.0-dev
+    override-build: |
+      wget -nc https://deac-ams.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.0.12/lazarus-project_2.0.12-0_amd64.deb
+      wget -nc https://netix.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.0.12/fpc-laz_3.2.0-1_amd64.deb
+      wget -nc https://netix.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.0.12/fpc-src_3.2.0-1_amd64.deb
+      apt install ./lazarus-project_2.0.12-0_amd64.deb ./fpc-laz_3.2.0-1_amd64.deb ./fpc-src_3.2.0-1_amd64.deb
+    prime: [-*]
+  cudatext:
+    after: [lazarus]
+    plugin: nil
+    source: .
+    source-type: local
+    override-build: |
+      snapcraftctl build
+      lazbuild app/cudatext.lpi
+      install -d -m 755 $SNAPCRAFT_PART_INSTALL/usr/bin
+      install -s -m 755 app/cudatext $SNAPCRAFT_PART_INSTALL/usr/bin
+      install -d -m 755 $SNAPCRAFT_PART_INSTALL/usr/share/applications
+      install -m 755 Install/snap/local/CudaText.desktop $SNAPCRAFT_PART_INSTALL/usr/share/applications
+      install -d -m 755 $SNAPCRAFT_PART_INSTALL/usr/share/pixmaps
+      install -m 644 Install/snap/local/CudaText.png $SNAPCRAFT_PART_INSTALL/usr/share/pixmaps      
+      install -d -m 755 $SNAPCRAFT_PART_INSTALL/usr/share/cudatext/data
+      cp -r app/data $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
+      cp -r app/py $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
+      cp -r app/settings_default $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
+    stage:
+    - usr
+    - usr/bin
+    - usr/share/cudatext
+    - usr/share/applications/CudaText.desktop
+    - usr/share/pixmaps
+    stage-packages:
+    - libgtk2.0-0
+
+apps:
+  cudatext:
+    command: usr/bin/cudatext
+    desktop: usr/share/applications/CudaText.desktop
+    plugs:
+    - desktop
+    - x11
+    - home
+
+layout:
+  /usr/share/cudatext:
+    bind: $SNAP/usr/share/cudatext

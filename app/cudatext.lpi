@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
   <ProjectOptions>
-    <Version Value="12"/>
+    <Version Value="11"/>
     <PathDelim Value="\"/>
     <General>
-      <Flags>
-        <CompatibilityMode Value="True"/>
-      </Flags>
       <SessionStorage Value="InProjectDir"/>
+      <MainUnit Value="0"/>
       <AutoCreateForms Value="False"/>
       <Title Value="CudaText"/>
       <ResourceType Value="res"/>
@@ -1121,40 +1119,51 @@
     </PublishOptions>
     <RunParams>
       <FormatVersion Value="2"/>
+      <Modes Count="0"/>
     </RunParams>
     <RequiredPackages Count="12">
       <Item1>
         <PackageName Value="BGRABitmapPack"/>
+        <DefaultFilename Value="packages\bgrabitmap\bgrabitmappack.lpk" Prefer="True"/>
       </Item1>
       <Item2>
         <PackageName Value="encconv_package"/>
+        <DefaultFilename Value="packages\encconv\encconv_package.lpk" Prefer="True"/>
       </Item2>
       <Item3>
         <PackageName Value="emmet_package"/>
+        <DefaultFilename Value="packages\emmet\emmet_package.lpk" Prefer="True"/>
       </Item3>
       <Item4>
         <PackageName Value="atsynedit_cmp_package"/>
+        <DefaultFilename Value="packages\atsynedit_cmp\atsynedit_cmp_package.lpk" Prefer="True"/>
       </Item4>
       <Item5>
         <PackageName Value="atsynedit_package"/>
+        <DefaultFilename Value="packages\atsynedit\atsynedit_package.lpk" Prefer="True"/>
       </Item5>
       <Item6>
         <PackageName Value="atbinhex_package"/>
+        <DefaultFilename Value="packages\atbinhex\atbinhex_package.lpk" Prefer="True"/>
       </Item6>
       <Item7>
         <PackageName Value="atflatcontrols_package"/>
+        <DefaultFilename Value="packages\atflatcontrols\atflatcontrols_package.lpk" Prefer="True"/>
       </Item7>
       <Item8>
         <PackageName Value="atsynedit_ex_package"/>
+        <DefaultFilename Value="packages\atsynedit_ex\atsynedit_ex_package.lpk" Prefer="True"/>
       </Item8>
       <Item9>
         <PackageName Value="python4lazarus_package"/>
+        <DefaultFilename Value="packages\python4lazarus\python4lazarus_package.lpk" Prefer="True"/>
       </Item9>
       <Item10>
         <PackageName Value="LazControls"/>
       </Item10>
       <Item11>
         <PackageName Value="econtrol_package"/>
+        <DefaultFilename Value="packages\econtrol\econtrol_package.lpk" Prefer="True"/>
       </Item11>
       <Item12>
         <PackageName Value="LCL"/>
