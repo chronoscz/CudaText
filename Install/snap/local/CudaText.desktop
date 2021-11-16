@@ -1,10 +1,11 @@
 [Desktop Entry]
-Encoding=UTF-8
 Name=CudaText
-Comment=Open source and cross-platform text editor.
-Exec=cudatext
-Icon=CudaText
+GenericName=Text Editor
+Comment=Text and code editor. Syntax highlighting for 250+ languages. Supports all major encodings. Multi-carets and multi-selections. UI with tabs and sidebar. Search and replace with regex.
+Exec=cudatext %F
 Terminal=false
 Type=Application
-Categories=GNOME;Application;Productivity;
 StartupNotify=true
+MimeType=text/plain;
+Categories=Development;TextEditor;
+Icon=CudaText
