@@ -15,7 +15,7 @@ uses
   Classes, SysUtils, Graphics, Forms, Controls, Dialogs,
   ExtCtrls, Menus, StdCtrls, StrUtils, ComCtrls, Clipbrd,
   LCLIntf, LCLProc, LCLType, LazUTF8, LazFileUtils, FileUtil,
-  GraphUtil, IniFiles,
+  IniFiles,
   ATTabs,
   ATGroups,
   ATScrollBar,
@@ -191,7 +191,8 @@ type
     procedure DoDeactivatePictureMode;
     procedure DoDeactivateViewerMode;
     procedure DoFileOpen_Ex(Ed: TATSynEdit; const AFileName: string;
-      AAllowLoadHistory, AAllowLoadHistoryEnc, AAllowLexerDetect, AAllowErrorMsgBox,
+      AAllowLoadHistory, AAllowLoadHistoryEnc, AAllowLoadBookmarks,
+      AAllowLexerDetect, AAllowErrorMsgBox,
       AKeepScroll, AAllowLoadUndo: boolean; AOpenMode: TAppOpenMode);
     procedure DoImageboxScroll(Sender: TObject);
     procedure DoOnChangeCaption;
@@ -222,7 +223,7 @@ type
     procedure EditorOnDrawBookmarkIcon(Sender: TObject; C: TCanvas; ALineNum: integer; const ARect: TRect);
     procedure EditorOnEnter(Sender: TObject);
     procedure EditorOnDrawLine(Sender: TObject; C: TCanvas; ALineIndex, AX, AY: integer;
-      const AStr: atString; ACharSize: TPoint; constref AExtent: TATIntFixedArray);
+      const AStr: atString; const ACharSize: TATEditorCharSize; constref AExtent: TATIntFixedArray);
     procedure EditorOnCalcBookmarkColor(Sender: TObject; ABookmarkKind: integer; var AColor: TColor);
     procedure EditorOnHotspotEnter(Sender: TObject; AHotspotIndex: integer);
     procedure EditorOnHotspotExit(Sender: TObject; AHotspotIndex: integer);
@@ -296,7 +297,7 @@ type
     procedure DoSaveUndo(Ed: TATSynEdit; const AFileName: string);
     procedure DoLoadUndo(Ed: TATSynEdit);
     procedure DoSaveHistory_Caret(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString);
-    procedure DoSaveHistory_Bookmarks(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString; AForSession: boolean);
+    procedure DoSaveHistory_Bookmarks(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString);
 
   protected
     procedure DoOnResize; override;
@@ -405,7 +406,8 @@ type
     function IsParsingBusy: boolean;
     //file
     procedure DoFileClose;
-    procedure DoFileOpen(const AFileName, AFileName2: string; AAllowLoadHistory, AAllowLexerDetect,
+    procedure DoFileOpen(const AFileName, AFileName2: string;
+      AAllowLoadHistory, AAllowLoadBookmarks, AAllowLexerDetect,
       AAllowErrorMsgBox, AAllowLoadUndo: boolean; AOpenMode: TAppOpenMode);
     procedure DoFileOpen_AsBinary(const AFileName: string; AMode: TATBinHexMode);
     procedure DoFileOpen_AsPicture(const AFileName: string);
@@ -417,7 +419,8 @@ type
     //history
     procedure DoSaveHistory(Ed: TATSynEdit);
     procedure DoSaveHistoryEx(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString; AForSession: boolean);
-    procedure DoLoadHistory(Ed: TATSynEdit; AllowEnc: boolean);
+    procedure DoLoadHistory(Ed: TATSynEdit; AllowLoadEncoding, AllowLoadHistory,
+      AllowLoadBookmarks: boolean);
     procedure DoLoadHistoryEx(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString; AllowEnc: boolean);
     procedure DoLoadHistory_Bookmarks(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString);
     //misc
@@ -491,10 +494,7 @@ const
   cHistory_Unpri_Ends   = '/unprinted_ends';
   cHistory_Unpri_Detail = '/unprinted_end_details';
   cHistory_Caret       = '/crt';
-  //cHistory_Markers     = '/mrk';
   cHistory_TabColor    = '/color';
-  cHistory_Bookmark    = '/bm';
-  cHistory_BookmarkKind = '/bm_kind';
   cHistory_FoldingShow  = '/fold';
   cHistory_FoldedRanges = '/folded';
   cHistory_CodeTreeFilter = '/codetree_filter';
@@ -815,8 +815,10 @@ begin
 end;
 
 procedure TEditorFrame.EditorOnChangeCaretPos(Sender: TObject);
+{$ifdef linux}
 const
   cMaxSelectedLinesForAutoCopy = 200;
+{$endif}
 var
   Params: TAppVariantArray;
   Ed: TATSynEdit;
@@ -886,7 +888,7 @@ end;
 
 
 procedure TEditorFrame.EditorOnDrawLine(Sender: TObject; C: TCanvas;
-  ALineIndex, AX, AY: integer; const AStr: atString; ACharSize: TPoint;
+  ALineIndex, AX, AY: integer; const AStr: atString; const ACharSize: TATEditorCharSize;
   constref AExtent: TATIntFixedArray);
 var
   Ed: TATSynEdit;
@@ -1424,8 +1426,6 @@ begin
 end;
 
 procedure TEditorFrame.UpdatePinned(Ed: TATSynEdit; AWithEvent: boolean);
-var
-  Params: TAppVariantArray;
 begin
   if TabPinned then
     DoRemovePreviewStyle;
@@ -2283,7 +2283,7 @@ begin
 end;
 
 procedure TEditorFrame.DoFileOpen(const AFileName, AFileName2: string;
-  AAllowLoadHistory, AAllowLexerDetect, AAllowErrorMsgBox, AAllowLoadUndo: boolean;
+  AAllowLoadHistory, AAllowLoadBookmarks, AAllowLexerDetect, AAllowErrorMsgBox, AAllowLoadUndo: boolean;
   AOpenMode: TAppOpenMode);
 begin
   NotifEnabled:= false; //for binary-viewer and pictures, NotifEnabled must be False
@@ -2347,6 +2347,7 @@ begin
   DoFileOpen_Ex(Ed1, AFileName,
     AAllowLoadHistory,
     AAllowLoadHistory,
+    AAllowLoadBookmarks,
     AAllowLexerDetect,
     AAllowErrorMsgBox,
     false,
@@ -2361,6 +2362,7 @@ begin
     DoFileOpen_Ex(Ed2, AFileName2,
       AAllowLoadHistory,
       AAllowLoadHistory,
+      AAllowLoadBookmarks,
       AAllowLexerDetect,
       AAllowErrorMsgBox,
       false,
@@ -2372,7 +2374,7 @@ begin
 end;
 
 procedure TEditorFrame.DoFileOpen_Ex(Ed: TATSynEdit; const AFileName: string;
-  AAllowLoadHistory, AAllowLoadHistoryEnc, AAllowLexerDetect,
+  AAllowLoadHistory, AAllowLoadHistoryEnc, AAllowLoadBookmarks, AAllowLexerDetect,
   AAllowErrorMsgBox, AKeepScroll, AAllowLoadUndo: boolean; AOpenMode: TAppOpenMode);
 begin
   try
@@ -2399,8 +2401,7 @@ begin
   if AAllowLoadUndo then
     DoLoadUndo(Ed);
 
-  if AAllowLoadHistory then
-    DoLoadHistory(Ed, AAllowLoadHistoryEnc);
+  DoLoadHistory(Ed, AAllowLoadHistoryEnc, AAllowLoadHistory, AAllowLoadBookmarks);
 
   //save temp-options, to later know which options are changed,
   //during loading of lexer-specific config
@@ -2638,7 +2639,6 @@ var
   PrevTail: boolean;
   Mode: TAppOpenMode;
   SFileName: string;
-  Params: TAppVariantArray;
 begin
   Result:= true;
   SFileName:= GetFileName(Ed);
@@ -2689,6 +2689,7 @@ begin
   DoFileOpen_Ex(Ed, SFileName,
     true{AllowLoadHistory},
     false{AllowLoadHistoryEnc},
+    false{AllowLoadBookmarks},
     false{AllowLexerDetect},
     false{AllowMsgBox},
     true{KeepScroll},
@@ -3065,7 +3066,7 @@ var
 begin
   St:= Ed.Strings;
   if St.Count=0 then exit;
-  NWidthSmall:= Ed.TextCharSize.X * EditorOps.OpMicromapSmallMarkSizePercents div 100;
+  NWidthSmall:= Ed.TextCharSize.XScaled * EditorOps.OpMicromapSmallMarkSizePercents div 100 div ATEditorCharXScale;
 
   if FMicromapBmp=nil then
     FMicromapBmp:= TBGRABitmap.Create;
@@ -3247,6 +3248,10 @@ begin
     end;
 
     DoSaveHistoryEx(Ed, cfg, path, false);
+
+    //bookmarks are always saved to 'history files.json'
+    if UiOps.HistoryItems[ahhBookmarks] then
+      DoSaveHistory_Bookmarks(Ed, cfg, path);
   finally
     cfg.Free;
   end;
@@ -3281,42 +3286,8 @@ end;
 
 procedure TEditorFrame.DoLoadHistory_Bookmarks(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString);
 var
-  items, items2: TStringList;
-  BmData: TATBookmarkData;
-  nTop, nKind, i: integer;
   SKey, SValue: UnicodeString;
 begin
-  //loading bookmarks - deprecated, delete after 2021.10
-
-  FillChar(BmData, SizeOf(BmData), 0);
-  BmData.ShowInBookmarkList:= true;
-
-  items:= TStringList.Create;
-  items2:= TStringList.Create;
-  try
-    c.GetValue(path+cHistory_Bookmark, items, '');
-    c.GetValue(path+cHistory_BookmarkKind, items2, '');
-    for i:= 0 to items.Count-1 do
-    begin
-      nTop:= StrToIntDef(items[i], -1);
-      if i<items2.Count then
-        nKind:= StrToIntDef(items2[i], 1)
-      else
-        nKind:= 1;
-      if Ed.Strings.IsIndexValid(nTop) then
-      begin
-        BmData.LineNum:= nTop;
-        BmData.Kind:= nKind;
-        BmData.AutoDelete:= bmadOption;
-        Ed.Strings.Bookmarks.Add(BmData);
-      end;
-    end;
-  finally
-    FreeAndNil(items2);
-    FreeAndNil(items);
-  end;
-
-  //loading bookmarks - modern
   if Ed.FileName<>'' then
   begin
     SKey:= AppConfigKeyForBookmarks(Ed);
@@ -3326,44 +3297,11 @@ begin
   end;
 end;
 
-procedure TEditorFrame.DoSaveHistory_Bookmarks(Ed: TATSynEdit; c: TJsonConfig;
-  const path: UnicodeString; AForSession: boolean);
+procedure TEditorFrame.DoSaveHistory_Bookmarks(Ed: TATSynEdit; c: TJsonConfig; const path: UnicodeString);
 var
-  items, items2: TStringList;
-  bookmark: PATBookmarkItem;
   SKey: UnicodeString;
-  i: integer;
 begin
-  //saving bookmarks - deprecated, delete after 2021.10
-  items:= TStringList.Create;
-  items2:= TStringList.Create;
-  try
-    for i:= 0 to Ed.Strings.Bookmarks.Count-1 do
-    begin
-      bookmark:= Ed.Strings.Bookmarks[i];
-      //save usual bookmarks and numbered bookmarks (kind=1..10)
-      if (bookmark^.Data.Kind>10) then Continue;
-      items.Add(IntToStr(bookmark^.Data.LineNum));
-      items2.Add(IntToStr(bookmark^.Data.Kind));
-    end;
-
-    if items.Count>0 then
-      c.SetValue(path+cHistory_Bookmark, items)
-    else
-      c.DeleteValue(path+cHistory_Bookmark);
-
-    if items2.Count>0 then
-      c.SetValue(path+cHistory_BookmarkKind, items2)
-    else
-      c.DeleteValue(path+cHistory_BookmarkKind);
-
-  finally
-    FreeAndNil(items2);
-    FreeAndNil(items);
-  end;
-
-  //saving bookmarks - modern
-  if (not AForSession) and (Ed.FileName<>'') then
+  if Ed.FileName<>'' then
   begin
     SKey:= AppConfigKeyForBookmarks(Ed);
     if Ed.Strings.Bookmarks.Count>0 then
@@ -3463,9 +3401,6 @@ begin
     c.SetDeleteValue(path+cHistory_Markers, Ed.Markers.AsString, '');
   }
 
-  if UiOps.HistoryItems[ahhBookmarks] then
-    DoSaveHistory_Bookmarks(Ed, c, path, AForSession);
-
   if UiOps.HistoryItems[ahhCodeTreeFilter] then
   begin
     c.SetDeleteValue(path+cHistory_CodeTreeFilter, FCodetreeFilter, '');
@@ -3509,7 +3444,7 @@ begin
   end;
 end;
 
-procedure TEditorFrame.DoLoadHistory(Ed: TATSynEdit; AllowEnc: boolean);
+procedure TEditorFrame.DoLoadHistory(Ed: TATSynEdit; AllowLoadEncoding, AllowLoadHistory, AllowLoadBookmarks: boolean);
 var
   cfg: TJSONConfig;
   SFileName: string;
@@ -3517,8 +3452,10 @@ var
 begin
   SFileName:= GetFileName(Ed);
   if SFileName='' then exit;
+
   path:= SMaskFilenameSlashes(SFileName);
 
+  if not (AllowLoadHistory or AllowLoadBookmarks) then exit;
   if UiOps.MaxHistoryFiles<2 then exit;
 
   AppFileCheckForNullBytes(AppFile_HistoryFiles);
@@ -3536,7 +3473,11 @@ begin
       end;
     end;
 
-    DoLoadHistoryEx(Ed, cfg, path, AllowEnc);
+    if AllowLoadHistory then
+      DoLoadHistoryEx(Ed, cfg, path, AllowLoadEncoding);
+
+    if AllowLoadBookmarks then
+      DoLoadHistory_Bookmarks(Ed, cfg, path);
   finally
     cfg.Free;
   end;
@@ -3550,8 +3491,7 @@ var
   Caret: TATCaretItem;
   NCaretPosX, NCaretPosY,
   NCaretEndX, NCaretEndY: integer;
-  nTop, nKind, i: integer;
-  items, items2: TStringlist;
+  nTop, i: integer;
   Sep: TATStringSeparator;
   NFlag: integer;
 begin
@@ -3730,9 +3670,6 @@ begin
 
   //solve CudaText #3288, so Undo jumps to initial caret pos
   Ed.Strings.ActionSaveLastEditionPos(NCaretPosX, NCaretPosY);
-
-  //bookmarks
-  DoLoadHistory_Bookmarks(Ed, c, path);
 
   FCodetreeFilter:= c.GetValue(path+cHistory_CodeTreeFilter, '');
   c.GetValue(path+cHistory_CodeTreeFilters, FCodetreeFilterHistory, '');

@@ -17,8 +17,8 @@ uses
   ATSynEdit;
 
 const
-  cAppExeVersion = '1.148.5.0';
-  cAppApiVersion = 413;
+  cAppExeVersion = '1.152.0.2';
+  cAppApiVersion = 414;
 
 const
   cOptionSystemSuffix =
@@ -329,7 +329,7 @@ const
 
   msgCommandNeedsPython: string =
     'This command requires Python engine.'+
-    ' Set proper value of "pylib*" in user.json.';
+    ' Set proper value of "pylib'+cOptionSystemSuffix+'" in the user.json.';
 
   msgCommandLineHelp =
       'Usage:'+EOL+
@@ -413,6 +413,7 @@ const
   msgFindHint_RepAll: string = 'Replace all matches in current document';
   msgFindHint_RepGlobal: string = 'Replace all matches in all opened tabs';
   msgFindHint_Regex: string = 'Regular expressions';
+  msgFindHint_RegexSubst: string = 'RegEx substitution for ''Replace with''';
   msgFindHint_Case: string = 'Case sensitive';
   msgFindHint_Words: string = 'Whole words';
   msgFindHint_Wrapped: string = 'Wrapped search';

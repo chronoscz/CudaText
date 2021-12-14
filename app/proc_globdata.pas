@@ -36,7 +36,6 @@ uses
   ATStringProc,
   ATStringProc_Separator,
   ATFlatThemes,
-  ATListbox,
   ATStatusBar,
   ATScrollBar,
   ATTabs,
@@ -300,6 +299,7 @@ type
     FindShow_SyntaxElements: boolean;
     FindShow_HiAll: boolean;
     FindShow_ConfirmRep: boolean;
+    FindShow_RegexSubst: boolean;
 
     FindIndentVert: integer;
     FindIndentHorz: integer;
@@ -372,7 +372,8 @@ type
 
     ReopenSession: boolean;
     ReopenSessionWithCmdLine: boolean;
-    AutoSaveSession: boolean;
+    SessionSaveInterval: integer;
+    SessionSaveOnExit: boolean;
     BackupLastSessions: integer;
     SaveModifiedTabsOnClose: boolean;
 
@@ -475,8 +476,6 @@ type
     OpSpacingY: integer;
     OpTabSize: integer;
     OpTabSpaces: boolean;
-    OpTabMaxPosExpanded: integer;
-    OpMaxLineLenForAccurateCharWidths: integer;
     OpMaxLineLenForBracketFinder: integer;
     OpMaxLineLenToTokenize: integer;
 
@@ -489,7 +488,6 @@ type
     OpOverwriteOnPaste: boolean;
     OpPasteWithEolAtLineStart: boolean;
 
-    OpAutoFoldComments: integer;
     OpAutoCloseBracketsMultiCarets: boolean;
     OpAutoCloseBrackets: string;
     OpAutocompleteAutoshowCharCount: integer;
@@ -551,15 +549,6 @@ type
     //unprinted
     OpUnprintedShow: boolean;
     OpUnprintedContent: string;
-
-    OpUnprintedReplaceSpec: boolean;
-    OpUnprintedReplaceToCode: string;
-
-    OpUnprintedTabArrowLen: integer;
-    OpUnprintedSpaceDotScale: integer;
-    OpUnprintedEndDotScale: integer;
-    OpUnprintedEndFontScale: integer;
-    OpUnprintedTabPointerScale: integer;
 
     //wrap
     OpWrapMode: integer;
@@ -634,7 +623,6 @@ type
     //mouse
     OpMouse2ClickDragSelectsWords: boolean;
     OpMouseDragDrop: boolean;
-    OpMouseDragDropFocusTarget: boolean;
     OpMouseMiddleClickAction: integer;
     OpMouseRightClickMovesCaret: boolean;
     OpMouseEnableColumnSelection: boolean;
@@ -759,6 +747,7 @@ function AppExpandHomeDirInFilename(const fn: string): string;
 function AppExpandFileNameWithDir(const AFileName, ADir: string): string;
 function AppConfigKeyForBookmarks(Ed: TATSynEdit): string;
 procedure AppDiskCheckFreeSpace(const fn: string);
+function AppKeyIsAllowedAsCustomHotkey(Key: Word; Shift: TShiftState): boolean;
 
 var
   AppManager: TecLexerList = nil;
@@ -1003,6 +992,8 @@ type
 
     class function CommandCode_To_HotkeyStringId(ACmd: integer): string;
     class function HotkeyStringId_To_CommandCode(const AId: string): integer;
+
+    class function Debug_PluginCommands(const AModule: string): string;
   end;
 
 
@@ -1465,8 +1456,6 @@ begin
 
     OpTabSize:= 4;
     OpTabSpaces:= false;
-    OpTabMaxPosExpanded:= 500;
-    OpMaxLineLenForAccurateCharWidths:= 500;
     OpMaxLineLenToTokenize:= 4000;
     OpMaxLineLenForBracketFinder:= 1000;
 
@@ -1479,7 +1468,6 @@ begin
     OpOverwriteOnPaste:= false;
     OpPasteWithEolAtLineStart:= false; //maybe change it later to True (like Sublime, VSCode)
 
-    OpAutoFoldComments:= 0; //disabled by default, issue #3074
     OpAutoCloseBracketsMultiCarets:= true; //must be True, issue #3235
     OpAutoCloseBrackets:= '([{';
     OpAutocompleteAutoshowCharCount:= 0;
@@ -1539,14 +1527,6 @@ begin
 
     OpUnprintedShow:= false;
     OpUnprintedContent:= 'se';
-    OpUnprintedReplaceSpec:= false;
-    OpUnprintedReplaceToCode:= 'A4';
-
-    OpUnprintedTabArrowLen:= 1;
-    OpUnprintedSpaceDotScale:= 15;
-    OpUnprintedEndDotScale:= 30;
-    OpUnprintedEndFontScale:= 80;
-    OpUnprintedTabPointerScale:= 22;
 
     OpWrapMode:= 0;
     OpWrapIndented:= true;
@@ -1615,7 +1595,6 @@ begin
 
     OpMouse2ClickDragSelectsWords:= true;
     OpMouseDragDrop:= true;
-    OpMouseDragDropFocusTarget:= true;
     OpMouseMiddleClickAction:= Ord(TATEditorMiddleClickAction.mcaScrolling);
     OpMouseRightClickMovesCaret:= false;
     OpMouseEnableColumnSelection:= true;
@@ -1807,6 +1786,7 @@ begin
     FindShow_SyntaxElements:= true;
     FindShow_HiAll:= true;
     FindShow_ConfirmRep:= true;
+    FindShow_RegexSubst:= true;
 
     FindIndentVert:= -5;
     FindIndentHorz:= 10;
@@ -1890,7 +1870,8 @@ begin
 
     ReopenSession:= true;
     ReopenSessionWithCmdLine:= false;
-    AutoSaveSession:= false;
+    SessionSaveInterval:= 30;
+    SessionSaveOnExit:= false;
     BackupLastSessions:= 0;
     SaveModifiedTabsOnClose:= true;
 
@@ -2007,6 +1988,20 @@ begin
   else
     //usual item
     Result:= StrToIntDef(AId, -1);
+end;
+
+class function TPluginHelper.Debug_PluginCommands(const AModule: string): string;
+var
+  CmdItem: TAppCommandInfo;
+  i: integer;
+begin
+  Result:= '';
+  for i:= 0 to AppCommandList.Count-1 do
+  begin
+    CmdItem:= TAppCommandInfo(AppCommandList[i]);
+    if CmdItem.ItemModule=AModule then
+      Result+= CmdItem.CommaStr+#10;
+  end;
 end;
 
 
@@ -2906,8 +2901,10 @@ end;
 
 
 function RemoveWindowsStreamSuffix(const fn: string): string;
+{$ifdef windows}
 var
   PosSlash, PosColon: integer;
+{$endif}
 begin
   Result:= fn;
   {$ifdef windows}
@@ -2969,8 +2966,14 @@ begin
         Result:= categ_Plugin;
         N:= Cmd-cmdFirstPluginCommand;
         if N<AppCommandList.Count then
+        begin
           if TAppCommandInfo(AppCommandList[N]).ItemFromApi then
             Result:= categ_PluginSub;
+        end
+        else
+          //we are here when e.g. in plugin Macros user deletes a macro,
+          //so code detects category of deleted command-code
+          Result:= categ_PluginSub;
       end;
     cmdFirstLexerCommand..cmdLastLexerCommand:
       Result:= categ_Lexer;
@@ -3287,6 +3290,29 @@ begin
       Format(msgErrorLowDiskSpaceMb, [NSpace div (1024*1024)]),
       MB_RETRYCANCEL or MB_ICONWARNING) = ID_CANCEL then exit;
   until false;
+end;
+
+function AppKeyIsAllowedAsCustomHotkey(Key: Word; Shift: TShiftState): boolean;
+begin
+  Result:= true;
+
+  //don't allow to reassign system keys: Alt/Ctrl/Shift/Win
+  if (Key=VK_MENU) or
+     (Key=VK_LMENU) or
+     (Key=VK_RMENU) or
+     (Key=VK_CONTROL) or
+     (Key=VK_LCONTROL) or
+     (Key=VK_RCONTROL) or
+     (Key=VK_SHIFT) or
+     (Key=VK_LSHIFT) or
+     (Key=VK_RSHIFT) or
+     (Key=VK_LWIN) or
+     (Key=VK_RWIN) then
+    exit(false);
+
+  //don't allow to reassign these
+  if (Key in [VK_SPACE, VK_RETURN, VK_TAB, VK_BACK]) and (Shift=[]) then
+    exit(false);
 end;
 
 initialization

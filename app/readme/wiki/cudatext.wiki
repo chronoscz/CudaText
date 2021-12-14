@@ -288,10 +288,12 @@ Dialog "Lexer library" has hotkeys:
 === Lexers on SourceForge ===
 
 Preinstalled lexer library has limited set of lexers.
-Other lexers, which are compatible with SynWrite editor, are hosted on SF.net:
-http://sourceforge.net/projects/synwrite-addons/files/Lexers/
+All other lexers are [https://sourceforge.net/projects/cudatext/files/addons/lexers/ hosted on CudaText.SF.net].
+You can download the [https://sourceforge.net/projects/cudatext/files/addons_all/ entire add-ons pack] too.
 
-These zip packages can be installed in CudaText: open any zip file via "File / Open" and confirm installation.
+To install "lexer.*.zip" (or any add-on ZIP file) in CudaText: open this ZIP file via "File / Open", CudaText will suggest to install it.
+
+[[File:cudatext-zip-install-prompt.png]]
 
 === List of lexers ===
 
@@ -330,6 +332,7 @@ Most of them are located in the Addons Manager "Install" list.
 * Assembly STM32
 * Assembly Z80 SjASM
 * Assembly Z80 RGBDS
+* Astro
 * Asymptote
 * Autoconf M4
 * AutoHotkey
@@ -392,6 +395,7 @@ Most of them are located in the Addons Manager "Install" list.
 * Gherkin (Cucumber; Behat)
 * GHS.com MULTI IDE (3 lexers)
 * GLSL
+* GNU linker
 * Gnuplot
 * Go
 * Gold Parser
@@ -699,6 +703,44 @@ but not for several stream-comments on a single line).
 Previously, CudaText allowed something like this, via lexer configuration: all needed lexers must have
 special settings inside them, and this worked for 2+ lines, not for custom value.
 After the option "auto_fold_comments" appeared, all 3rd-party lexers should be stripped of those old settings.
+
+===Fenced code-blocks===
+
+[[File:cudatext-fenced-blocks.png]]
+
+This is the feature of Markdown syntax: fenced code blocks.
+Blocks begin with:
+
+* start of line
+* optional spaces
+* 3 or more backtick-chars (also tilde-chars are allowed)
+* optional spaces
+* lexer alias like "cpp" or "cs"
+* optional spaces
+* end of line.
+
+Blocks end with:
+
+* start of line
+* optional spaces
+* 3 or more backtick-chars (also tilde-chars are allowed)
+* optional spaces
+* end of line.
+
+The beginning and ending sequences are tokenized as single token.
+
+CudaText has the file which lists the supported lexer aliases: data/lexlib/aliases.ini.
+The file was compiled from [https://github.com/highlightjs/highlight.js/blob/main/SUPPORTED_LANGUAGES.md this document].
+Lexer alias will be resolved to the actual lexer name, only if that lexer is installed, otherwise
+you won't see an error, but block will not be syntax-highlighted.
+
+Note about SQL blocks. CudaText has lexer preinstalled, it's lite lexer "SQL ^", and it cannot be used here, because lite lexer cannot be called from normal lexer. But you can install (from "Plugins / Addons Manager") normal lexers: SQL; SQL White; SQL Blue; T-SQL (T-SQL has it's own alias "tsql"). Just install one of them, and it will be used for SQL blocks.
+
+'''Limitations:'''
+
+* Markdown standard tells that the beginning backticks must match the ending backticks, it must be the same amount of backticks. (And the same is valid for tildes.) This is currently not supported in CudaText version 1.151.
+* Python Markdown description tells that the lexer alias may be replaced with the curly-brackets construct like "{ .lang }" or "{ .lang .foo .bar }" or even "{ #someid .lang .foo .bar }". This is currently not supported in CudaText version 1.151.
+* The similar feature of the reStructuredText, as [https://pandemic-overview.readthedocs.io/en/latest/myGuides/reStructuredText-Source-Code.html documented here], is not supported. 
 
 ==Location of folders 'settings', 'py', 'data'==
 
@@ -1042,6 +1084,21 @@ Option buttons have hotkeys too. Hover mouse over them to see floating tooltips 
 * "?!" - Show confirmation on each replace - Alt+Y
 * "*" - Choose allowed syntax elements: Any / Only comments / Only strings / Only comments+strings / etc. This feature must be supported by lexer (and some lexers are limited, support only "comments" or only "strings" syntax elements). Syntax element is detected from left edge position of a found match.
 * "Hi" - Find and highlight all matches for the current search options. Matches are highlighted in the current editor, with the rounded borders, using the color of "SeparLine" syntax theme item. This highlight is updated on changing the "find what" text, so it is incremental. Editor auto-scrolls to the first found match (pretty much like ST3 editor). The limitation of this feature: a highlighted match has the single font color for the entire match, so if a match lays over several syntax tokens (e.g. number, dot, normal word), the entire match will have the single font color anyway. This "Hi" button is disabled, when current document has too many lines, see the option "find_hi_max_lines".
+
+* "$0" - "RegEx substitute for 'Replace with'". Activates "substitute" for replace-action. When off, the replate-with field is taken literally, without interpreting special constructs. When on, the replace-with field is processed for constructs:
+** $0: Text of the whole found match
+** $1 ... $9: Text of the found RegEx group with the index 1...9
+** \n: NL char
+** \r: CR char
+** \t: TAB char
+** \f: FF char
+** \a: BEL char
+** \e: ESC char
+** \xNN, \x{NNNN}: hex code of char
+** \l: lower case of one char
+** \L: lower case of all text
+** \u: upper case of one char
+** \U: upper case of all text  
 
 Action buttons in dialog:
 
@@ -1695,6 +1752,18 @@ You can also set colors of menu elements directly; dialog "Options / Settings - 
 
 By default, elements "top menu, ...." in the dialog have the "none" color (crossed rectangles), it means that custom colors are taken from other UI-theme elements.
 
+==Margins==
+
+CudaText gives 2 options to render vertical lines in specified columns:
+
+* "margin": Integer value, column of "normal margin" vertical line. This margin is used also by the word-wrapping, then "wrap_mode" option is 2 or 3. It is also used by CudaExt plugin's action(s) ("Re-wrap lines by margin").
+* "margin_string": String of space-separated numbers, it makes vertical lines appear at additional columns.
+
+The plugin "Column Marks" adds more features:
+
+* Commands to set the "normal margin" and/or "additional margins" via prompt dialog. Plugin can save entered value to the user.json config.
+* Commands to move the caret though all margin columns (normal + additional), to the left/right. 
+
 =Add-ons=
 
 ==Python API==
@@ -2256,6 +2325,18 @@ On Manjaro:
 If you run app in Terminal, you'll see an error about missing .so file. Reason of this error: FreeBSD version was compiled on Linux with different .so files. To fix error, run command in Terminal:
 
  $ sudo ln -s /usr/local/lib/libiconv.so.2 /usr/local/lib/libiconv.so.3
+
+===App cannot run on macOS===
+
+There is known issue, when macOS AArch64 version (ie ARM 64-bit version) cannot be run.
+The following command clears the extended attributes from the bundle, and it can be run:
+
+ xattr -cr /Applications/CudaText.app/
+
+(Adjust the file path, if you put the application bundle to a different place.)
+
+Also note, that our application bundle is not digitally signed.
+So to run it (the first time you do it), you should right-click the application bundle, and choose "Open" menu item, and confirm that you trust the vendor.
 
 ==How to select extra symbols by double-click==
 

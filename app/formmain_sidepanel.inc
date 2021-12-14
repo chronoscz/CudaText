@@ -69,8 +69,7 @@ begin
   ok:= false;
   AppPanels[cPaneSide].UpdatePanels(msgPanelTree_Init, false, true);
   if CodeTree.Visible and
-    CodeTreeFilterInput.Visible and
-    CodeTreeFilterInput.Enabled then
+    CodeTreeFilterInput.CanFocus then
   begin
     if AppPanels[cPaneSide].Floating then
       ok:= AppPanels[cPaneSide].FormFloat.Visible
@@ -78,7 +77,15 @@ begin
       ok:= true
   end;
   if ok then
+  begin
     EditorFocus(CodeTreeFilterInput);
+
+    {$ifndef windows}
+    //it helped on Linux gtk2, issue #3755
+    Application.ProcessMessages;
+    CodeTreeFilterInput.SetFocus;
+    {$endif}
+  end;
 end;
 
 procedure TfmMain.DoSidebar_FocusCodetree;

@@ -51,6 +51,7 @@ uses
   ATPanelSimple,
   ATCanvasPrimitives,
   ATSynEdit,
+  ATSynEdit_Options,
   ATSynEdit_Keymap,
   ATSynEdit_Keymap_Init,
   ATSynEdit_Commands,
@@ -65,7 +66,6 @@ uses
   ATSynEdit_Hotspots,
   ATSynEdit_Gutter_Decor,
   ATSynEdit_LineParts,
-  ATSynEdit_CanvasProc,
   ATSynEdit_Adapter_EControl,
   ATSynEdit_Adapter_LiteLexer,
   ATSynEdit_CharSizer,
@@ -722,6 +722,7 @@ type
     FLastFocusedFrame: TComponent;
     FLastTooltipLine: integer;
     FLastAppActivate: QWord;
+    FLastSaveSessionTick: QWord;
     FDisableTreeClearing: boolean;
     FInvalidateShortcuts: boolean;
     FInvalidateShortcutsForce: boolean;
@@ -754,6 +755,7 @@ type
     procedure PythonIOSendUniData(Sender: TObject; const Data: UnicodeString);
     procedure PythonModuleInitialization(Sender: TObject);
     procedure CodeTreeFilter_OnChange(Sender: TObject);
+    procedure CodeTreeFilter_OnKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure CodeTreeFilter_ResetOnClick(Sender: TObject);
     procedure CodeTreeFilter_OnCommand(Sender: TObject; ACmd: integer; AInvoke: TATEditorCommandInvoke;
       const AText: string; var AHandled: boolean);
@@ -761,7 +763,7 @@ type
     procedure DoApplyCli(const ACliModule: string; const ACliParams: TAppStringArray);
     procedure DoApplyNewdocLexer(F: TEditorFrame);
     procedure DoApplyCenteringOption;
-    procedure DoApplyLexerStyleMaps(AndApplyTheme: boolean);
+    procedure DoApplyLexerStylesMapsToFrames(AndApplyTheme: boolean);
     procedure DoApplyTranslationToGroups(G: TATGroups);
     procedure DoClearSingleFirstTab;
     procedure DoCloseAllTabs;
@@ -869,6 +871,7 @@ type
     procedure DoApplyTheme_ThemedMainMenu;
     procedure DoApplyThemeToGroups(G: TATGroups);
     procedure DoOnConsoleNumberChange(Sender: TObject);
+    procedure DoOnConsoleKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     function DoDialogConfigTheme(var AData: TAppTheme; AThemeUI: boolean): boolean;
     function DoDialogMenuApi(const AProps: TDlgMenuProps): integer;
     procedure DoDialogMenuTranslations;
@@ -976,7 +979,7 @@ type
     procedure DoOps_SaveThemes;
     procedure DoOps_LoadHistory;
     procedure DoOps_LoadHistory_GroupView(cfg: TJsonConfig);
-    function DoOps_SaveSession(const AFileName: string; ASaveModifiedTabs: boolean): boolean;
+    function DoOps_SaveSession(const AFileName: string; ASaveModifiedTabs, AByTimer: boolean): boolean;
     function DoOps_LoadSession(const AFileName: string; AllowShowPanels: boolean): boolean;
     procedure DoOps_SaveSessionsBackups(const ASessionFilename: string);
     procedure DoOps_LoadOptionsAndApplyAll;
@@ -1516,14 +1519,14 @@ type
     class procedure AddPluginsWithHotkeyBackup(AKeymap: TATKeymap; ABackup: TAppHotkeyBackup; ACategory: TAppCommandCategory);
     class procedure UpdateDynamicEx(AKeymap: TATKeymap; ACategory: TAppCommandCategory);
     class procedure UpdateDynamic(ACategory: TAppCommandCategory);
+    class function Debug_PluginCommands(AKeymap: TATKeymap; const AText: string): string;
+    class function Debug_PluginCommands(const AText: string): string;
   end;
 
 class procedure TKeymapHelperMain.DeleteCategoryWithHotkeyBackup(AKeymap: TATKeymap; ABackup: TAppHotkeyBackup; ACategory: TAppCommandCategory);
 var
   MapItem: TATKeymapItem;
-  CmdItem: TAppCommandInfo;
   Cmd, i: integer;
-  NPluginIndex: integer;
 begin
   for i:= AKeymap.Count-1 downto 0 do
   begin
@@ -1535,11 +1538,7 @@ begin
       //backup hotkeys of plugins
       //this function must not loose any hotkeys!
       if ACategory in [categ_Plugin, categ_PluginSub] then
-      begin
-        NPluginIndex:= Cmd-cmdFirstPluginCommand;
-        CmdItem:= TAppCommandInfo(AppCommandList[NPluginIndex]);
-        ABackup.Add(MapItem, CmdItem.CommaStr);
-      end;
+        ABackup.Add(MapItem, MapItem.Description);
 
       AKeymap.Delete(i);
     end;
@@ -1549,21 +1548,30 @@ end;
 class procedure TKeymapHelperMain.AddPluginsWithHotkeyBackup(AKeymap: TATKeymap; ABackup: TAppHotkeyBackup; ACategory: TAppCommandCategory);
 var
   CmdItem: TAppCommandInfo;
+  SCommandText: string;
   i: integer;
 begin
+  {
+  SCommandText:= ABackup.DebugText;
+  if SCommandText<>'' then
+    MsgBox(SCommandText, MB_OK);
+    }
+
   for i:= 0 to AppCommandList.Count-1 do
   begin
     CmdItem:= TAppCommandInfo(AppCommandList[i]);
     if CmdItem.ItemFromApi xor (ACategory=categ_PluginSub) then Continue;
     if CmdItem.ItemModule='' then Break;
     if SEndsWith(CmdItem.ItemCaption, '-') then Continue;
+    SCommandText:= CmdItem.CommaStr;
 
     AKeymap.Add(
       cmdFirstPluginCommand+i,
       'plugin: '+AppNicePluginCaption(CmdItem.ItemCaption),
-      [], []);
+      [], [],
+      SCommandText);
 
-    ABackup.Get(AKeymap[AKeymap.Count-1], CmdItem.CommaStr);
+    ABackup.Get(AKeymap[AKeymap.Count-1], SCommandText);
   end;
 end;
 
@@ -1577,6 +1585,9 @@ var
 begin
   KeysBackup:= TAppHotkeyBackup.Create;
   DeleteCategoryWithHotkeyBackup(AKeymap, KeysBackup, ACategory);
+
+  //if ACategory in [categ_Plugin, categ_PluginSub] then
+  //  MsgBox('1'#10+TKeymapHelperMain.Debug_PluginCommands(AKeymap, 'Macro'), MB_OK); ///////debug
 
   case ACategory of
     categ_Lexer:
@@ -1656,6 +1667,35 @@ begin
   begin
     Map:= TATKeymap(AppKeymapLexers.Objects[i]);
     UpdateDynamicEx(Map, ACategory);
+  end;
+end;
+
+class function TKeymapHelperMain.Debug_PluginCommands(AKeymap: TATKeymap;
+  const AText: string): string;
+var
+  Cmd, i: integer;
+begin
+  Result:= '';
+  for i:= 0 to AKeymap.Count-1 do
+  begin
+    Cmd:= AKeymap.Items[i].Command;
+    if TPluginHelper.CommandCategory(Cmd) in [categ_Plugin, categ_PluginSub] then
+      if Pos(AText, AKeymap.Items[i].Name)>0 then
+        Result+= AKeymap.Items[i].Name+#10;
+  end;
+end;
+
+class function TKeymapHelperMain.Debug_PluginCommands(const AText: string): string;
+var
+  Map: TATKeymap;
+  i: integer;
+begin
+  Result:= Debug_PluginCommands(AppKeymapMain, AText);
+
+  for i:= 0 to AppKeymapLexers.Count-1 do
+  begin
+    Map:= TATKeymap(AppKeymapLexers.Objects[i]);
+    Result+= Debug_PluginCommands(Map, AText);
   end;
 end;
 
@@ -2190,6 +2230,7 @@ procedure TfmMain.TimerAppIdleTimer(Sender: TObject);
 var
   S: UnicodeString;
   Frame: TEditorFrame;
+  NTick: QWord;
   NCnt, i: integer;
 begin
   //in Lazarus 2.1 trunk on Linux x64 gtk2/qt5, TimerAppIdle.Timer is called too early,
@@ -2284,6 +2325,21 @@ begin
   begin
     FNeedAppState_SubCommands:= false;
     DoPyEvent_AppState(APPSTATE_API_SUBCOMMANDS);
+  end;
+
+  //auto-save session (and text of modified tabs) each N seconds
+  if ((UiOps.SessionSaveInterval>0) and UiOps.ReopenSession) or
+     (UiOps.SessionSaveInterval<0) then
+  begin
+    NTick:= GetTickCount64;
+    if FLastSaveSessionTick=0 then
+      FLastSaveSessionTick:= NTick
+    else
+    if NTick-FLastSaveSessionTick>=Abs(UiOps.SessionSaveInterval)*1000 then
+    begin
+      FLastSaveSessionTick:= NTick;
+      DoOps_SaveSession(GetSessionFilename, true{ASaveModifiedTabs}, true{AByTimer});
+    end;
   end;
 end;
 
@@ -2514,6 +2570,7 @@ begin
   CodeTreeFilterInput.Align:= alClient;
   CodeTreeFilterInput.OnChange:= @CodeTreeFilter_OnChange;
   CodeTreeFilterInput.OnCommand:= @CodeTreeFilter_OnCommand;
+  CodeTreeFilterInput.OnKeyDown:= @CodeTreeFilter_OnKeyDown;
 end;
 
 procedure TfmMain.InitStatusbar;
@@ -2646,6 +2703,7 @@ begin
   InitConsole;
   fmConsole.OnConsoleNav:= @DoPyEvent_ConsoleNav;
   fmConsole.OnNumberChange:= @DoOnConsoleNumberChange;
+  fmConsole.OnKeyDown:=@DoOnConsoleKeyDown;
   InitSidebar; //after initing PanelCodeTreeAll, EditorOutput, EditorValidate, fmConsole
   InitBookmarkSetup;
 
@@ -2755,7 +2813,7 @@ begin
 
   {
   //seems doing DoCloseAllTabs on FormClose is bad idea:
-  //app asks to save modified tabs, even with UiOps.AutoSaveSession.
+  //app asks to save modified tabs, even with UiOps.SessionSaveOnExit.
   FSessionIsClosing:= true; //to avoid asking "Close pinned tab?"
   DoCloseAllTabs;
   }
@@ -2870,7 +2928,7 @@ begin
   if GetModifiedCount>0 then
     ACanClose:= (
       UiOps.ReopenSession and
-      UiOps.AutoSaveSession and
+      UiOps.SessionSaveOnExit and
       UiOps.HistoryItems[ahhText]
       )
       or DoDialogSaveTabs
@@ -3235,8 +3293,10 @@ procedure TfmMain.FormShow(Sender: TObject);
   end;
   //
   procedure _Init_CheckExePath;
+  {$ifdef windows}
   const
     BadStr: PChar = 'c:\Program Files';
+  {$endif}
   begin
     {$ifdef windows}
     if strlicomp(PChar(Application.ExeName), BadStr, Length(BadStr))=0 then
@@ -3532,7 +3592,7 @@ begin
   end;
 end;
 
-procedure TfmMain.DoApplyLexerStyleMaps(AndApplyTheme: boolean);
+procedure TfmMain.DoApplyLexerStylesMapsToFrames(AndApplyTheme: boolean);
 var
   F: TEditorFrame;
   An, AnIncorrect: TecSyntAnalyzer;
@@ -3601,7 +3661,7 @@ begin
   if F=nil then exit;
 
   if DoDialogLexerStylesMap(F.Lexer[F.Editor]) then
-    DoApplyLexerStyleMaps(false);
+    DoApplyLexerStylesMapsToFrames(false);
 end;
 
 procedure TfmMain.DoHelpAbout;
@@ -3894,7 +3954,7 @@ var
 begin
   if not AppPython.Inited then
   begin
-    MsgStatus(msgCommandNeedsPython);
+    MsgBox(msgCommandNeedsPython, MB_OK or MB_ICONWARNING);
     exit;
   end;
 
@@ -3953,6 +4013,29 @@ begin
   CodeTreeFilter.Text:= S;
 end;
 
+procedure TfmMain.CodeTreeFilter_OnKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+var
+  Frame: TEditorFrame;
+begin
+  if (Key=VK_ESCAPE) and (Shift=[]) then
+  begin
+    Frame:= CurrentFrame;
+    if Assigned(Frame) then
+      Frame.SetFocus;
+    Key:= 0;
+    exit
+  end;
+
+  //handle Tab-key, because LCL by default can jump to bottom-panel form
+  if (Key=VK_TAB) and (Shift=[]) then
+  begin
+    if CodeTree.Tree.CanFocus then
+      CodeTree.Tree.SetFocus;
+    Key:= 0;
+    exit;
+  end;
+end;
+
 procedure TfmMain.CodeTreeFilter_ResetOnClick(Sender: TObject);
 begin
   CodeTreeFilterInput.Text:= '';
@@ -3990,7 +4073,7 @@ function TfmMain.DoFileOpen(AFileName, AFileName2: string; APages: TATPages;
 var
   D: TATTabData;
   F: TEditorFrame;
-  bSilent, bPreviewTab, bEnableHistory, bEnableLoadUndo,
+  bSilent, bPreviewTab, bEnableHistory, bEnableLoadUndo, bEnableLoadBookmarks,
   bEnableEventPre, bEnableEventOpened, bEnableEventOpenedNone,
   bAllowZip, bAllowPics, bAllowLexerDetect, bDetectedPics,
   bAndActivate: boolean;
@@ -4024,6 +4107,7 @@ begin
   bSilent:= Pos('/silent', AOptions)>0;
   bPreviewTab:= Pos('/preview', AOptions)>0;
   bEnableHistory:= Pos('/nohistory', AOptions)=0;
+  bEnableLoadBookmarks:= true;
   bEnableLoadUndo:= Pos('/noloadundo', AOptions)=0;
   bEnableEventPre:= Pos('/noevent', AOptions)=0;
   bEnableEventOpened:= Pos('/noopenedevent', AOptions)=0;
@@ -4247,6 +4331,7 @@ begin
     Result.Adapter[Result.Ed2].Stop;
     Result.DoFileOpen(AFileName, AFileName2,
       bEnableHistory,
+      bEnableLoadBookmarks,
       bAllowLexerDetect,
       true,
       bEnableLoadUndo,
@@ -4273,6 +4358,7 @@ begin
       //tick:= GetTickCount64;
       F.DoFileOpen(AFileName, AFileName2,
         bEnableHistory,
+        bEnableLoadBookmarks,
         bAllowLexerDetect,
         true,
         bEnableLoadUndo,
@@ -4323,6 +4409,7 @@ begin
 
   F.DoFileOpen(AFileName, AFileName2,
     bEnableHistory,
+    bEnableLoadBookmarks,
     bAllowLexerDetect,
     true,
     bEnableLoadUndo,
@@ -5725,6 +5812,7 @@ end;
 
 procedure TfmMain.DoToggleFindReplaceDialog(AIsReplace: boolean);
 var
+  Frame: TEditorFrame;
   bFocusedBottom: boolean;
 begin
   bFocusedBottom:= IsFocusedFind;
@@ -5745,7 +5833,11 @@ begin
 
   if not fmFind.Visible then
     if bFocusedBottom then
-      CurrentFrame.SetFocus;
+    begin
+      Frame:= CurrentFrame;
+      if Assigned(Frame) then
+        Frame.SetFocus;
+    end;
 end;
 
 procedure TfmMain.DoToggleSidebar;
@@ -6653,12 +6745,15 @@ begin
   OpenURL('https://wiki.freepascal.org/CudaText');
 end;
 
-procedure TfmMain.DoCodetree_OnKeyDown(Sender: TObject; var Key: Word;
-  Shift: TShiftState);
+procedure TfmMain.DoCodetree_OnKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+var
+  Frame: TEditorFrame;
 begin
-  if (Key=VK_ESCAPE) then
+  if (Key=VK_ESCAPE) and (Shift=[]) then
   begin
-    CurrentFrame.SetFocus;
+    Frame:= CurrentFrame;
+    if Assigned(Frame) then
+      Frame.SetFocus;
     Key:= 0;
     exit
   end;
@@ -6668,6 +6763,15 @@ begin
     (Sender as TTreeView).OnDblClick(Sender);
     Key:= 0;
     exit
+  end;
+
+  //handle Tab-key, because LCL by default can jump to bottom-panel form
+  if (Key=VK_TAB) and (Shift=[]) then
+  begin
+    if CodeTreeFilterInput.CanFocus then
+      CodeTreeFilterInput.SetFocus;
+    Key:= 0;
+    exit;
   end;
 end;
 
@@ -6871,13 +6975,15 @@ begin
   mnuToolbarCommentStream.Caption:= msgCommentStreamToggle;
 end;
 
-procedure TfmMain.EditorOutput_OnKeyDown(Sender: TObject; var Key: Word;
-  Shift: TShiftState);
+procedure TfmMain.EditorOutput_OnKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+var
+  Frame: TEditorFrame;
 begin
-  //Esc
-  if (Key=VK_ESCAPE) then
+  if (Key=VK_ESCAPE) and (Shift=[]) then
   begin
-    CurrentFrame.SetFocus;
+    Frame:= CurrentFrame;
+    if Assigned(Frame) then
+      Frame.SetFocus;
     Key:= 0;
     exit
   end;
@@ -7554,7 +7660,7 @@ var
 begin
   if not AppPython.Inited then
   begin
-    MsgStatus(msgCommandNeedsPython);
+    MsgBox(msgCommandNeedsPython, MB_OK or MB_ICONWARNING);
     exit;
   end;
 
@@ -8173,7 +8279,7 @@ end;
 
 procedure TfmMain.InitConfirmPanel;
 const
-  cW = 10; //in avg chars
+  //cW = 10; //in avg chars
   cH = 2.5; //in avg chars
 begin
   if FCfmPanel=nil then
@@ -8530,6 +8636,37 @@ begin
     end;
   end;
 end;
+
+procedure TfmMain.DoOnConsoleKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+var
+  Ctl: TWinControl;
+  Frame: TEditorFrame;
+begin
+  //handle Tab-key because LCL by default can jump to side-panel form
+  if (Key=VK_TAB) and (Shift=[]) then
+  begin
+    if fmConsole.EdInput.Focused then
+      Ctl:= fmConsole.EdMemo
+    else
+      Ctl:= fmConsole.EdInput;
+    if Ctl.Visible and Ctl.CanFocus then
+      Ctl.SetFocus;
+    Key:= 0;
+    exit
+  end;
+
+  if (Key=VK_ESCAPE) and (Shift=[]) then
+  begin
+    Frame:= CurrentFrame;
+    if Assigned(Frame) then
+      Frame.SetFocus;
+    Key:= 0;
+    exit
+  end;
+
+  inherited KeyDown(Key, Shift);
+end;
+
 
 //----------------------------
 {$I formmain_loadsave.inc}

@@ -82,24 +82,13 @@ end;
 
 procedure TfmKeyInput.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
-  //dont allow to enter system keys: Alt/Ctrl/Shift/Win
-  if (Key=VK_MENU) or
-     (Key=VK_LMENU) or
-     (Key=VK_RMENU) or
-     (Key=VK_CONTROL) or
-     (Key=VK_LCONTROL) or
-     (Key=VK_RCONTROL) or
-     (Key=VK_SHIFT) or
-     (Key=VK_LSHIFT) or
-     (Key=VK_RSHIFT) or
-     (Key=VK_LWIN) or
-     (Key=VK_RWIN) then
+  if not AppKeyIsAllowedAsCustomHotkey(Key, Shift) then
   begin
     Key:= 0;
     exit
   end;
 
-  if (Key=VK_ESCAPE) then
+  if (Key=VK_ESCAPE) and (Shift=[]) then
   begin
     Key:= 0;
     ModalResult:= mrCancel;

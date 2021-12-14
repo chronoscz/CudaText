@@ -18,8 +18,8 @@ uses
   Dialogs, Forms,
   Clipbrd,
   ATSynEdit,
+  ATSynEdit_Options,
   ATSynEdit_LineParts,
-  ATSynEdit_CanvasProc,
   ATSynEdit_Carets,
   ATSynEdit_Markers,
   ATSynEdit_Commands,
@@ -204,8 +204,6 @@ begin
   Ed.OptOverwriteAllowedOnPaste:= Op.OpOverwriteOnPaste;
   Ed.OptPasteWithEolAtLineStart:= Op.OpPasteWithEolAtLineStart;
 
-  EControlOptions.AutoFoldComments:= Op.OpAutoFoldComments;
-
   Ed.OptAutoPairForMultiCarets:= Op.OpAutoCloseBracketsMultiCarets;
   Ed.OptAutoPairChars:= Op.OpAutoCloseBrackets;
   Ed.OptAutocompleteAutoshowCharCount:= Op.OpAutocompleteAutoshowCharCount;
@@ -287,26 +285,15 @@ begin
     Ed.OptUnprintedSpacesOnlyInSelection:= Pos('x', Op.OpUnprintedContent)>0;
   end;
 
-  //global options
-  OptMaxTabPositionToExpand:= Op.OpTabMaxPosExpanded;
-  OptMaxLineLenForAccurateCharWidths:= Op.OpMaxLineLenForAccurateCharWidths;
-
   Ed.OptMaxLineLenToTokenize:= Op.OpMaxLineLenToTokenize;
 
   if Pos('.', Op.OpUnprintedContent)>0 then
-    OptUnprintedEndSymbol:= aeueDot
+    ATEditorOptions.UnprintedEndSymbol:= aeueDot
   else
   if Pos('p', Op.OpUnprintedContent)>0 then
-    OptUnprintedEndSymbol:= aeuePilcrow
+    ATEditorOptions.UnprintedEndSymbol:= aeuePilcrow
   else
-    OptUnprintedEndSymbol:= aeueArrowDown;
-  OptUnprintedTabCharLength:= Op.OpUnprintedTabArrowLen;
-  OptUnprintedSpaceDotScale:= Op.OpUnprintedSpaceDotScale;
-  OptUnprintedEndDotScale:= Op.OpUnprintedEndDotScale;
-  OptUnprintedEndFontScale:= Op.OpUnprintedEndFontScale * 6 div 10;
-  OptUnprintedTabPointerScale:= Op.OpUnprintedTabPointerScale;
-  OptUnprintedReplaceSpec:= Op.OpUnprintedReplaceSpec;
-  OptUnprintedReplaceSpecToCode:= StrToInt('$'+Op.OpUnprintedReplaceToCode);
+    ATEditorOptions.UnprintedEndSymbol:= aeueArrowDown;
 
   if AApplyUnprintedAndWrap then
     if not Ed.IsModifiedWrapMode then
@@ -407,7 +394,6 @@ begin
 
   Ed.OptMouse2ClickDragSelectsWords:= Op.OpMouse2ClickDragSelectsWords;
   Ed.OptMouseDragDrop:= Op.OpMouseDragDrop;
-  ATSynEdit.OptMouseDragDropFocusesTargetEditor:= Op.OpMouseDragDropFocusTarget;
   Ed.OptMouseMiddleClickAction:= TATEditorMiddleClickAction(Op.OpMouseMiddleClickAction);
   Ed.OptMouseRightClickMovesCaret:= Op.OpMouseRightClickMovesCaret;
   Ed.OptMouseEnableColumnSelection:= Op.OpMouseEnableColumnSelection;
@@ -1261,7 +1247,7 @@ begin
   Sep.GetItemInt(Props.Width, 1);
   Sep.GetItemInt(Props.Height, -100);
   Sep.GetItemStr(S);
-  Props.EmptyInside:= S='_';
+  Props.EmptyInside:= Pos('_', S)>0;
 end;
 
 
@@ -1913,6 +1899,7 @@ begin
           Point(Finder.MatchEdPos.X, Finder.MatchEdPos.Y),
           UiOps.FindIndentHorz,
           UiOps.FindIndentVert,
+          true,
           true,
           true);
       end;

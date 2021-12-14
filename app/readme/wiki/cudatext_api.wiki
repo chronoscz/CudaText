@@ -86,7 +86,7 @@ Event handlers (Command.on_nnnnn methods) return-value is ignored is many cases,
 
 ==Events - Macros==
 
-* on_macro(self, ed_self, text): Called when command "macros: stop recording" runs. In text the "\n"-separated list of macro items is passed. These items were run after command "macros: start recording" and before command "macros: stop recording".
+* on_macro(self, ed_self, text): Called when command "start/stop macro recording" stops the recording. Param "text" is "\n"-separated list of macro items, which were run during the macro recording.
 ** if item is "number" then it's simple command.
 ** if item is "number,string" then it's command with str parameter (usually it's command cCommand_TextInsert).
 ** if item is "py:string_module,string_method,string_param" then it's call of Python plugin (usually string_param is empty).
@@ -220,6 +220,7 @@ Actions work with props of Find/Replace dialog, and props of low-level search en
 ** "op_case": option "case sensitive" of search engine
 ** "op_word": option "whole words" of search engine
 ** "op_regex": option "reg.ex." of search engine
+** "op_regex_subst": option "reg.ex. substitute in 'Replace with' field" of search engine
 ** "op_cfm": option "confirm on replace" of search engine
 ** "op_insel": option "in selection" of search engine
 ** "op_wrap": option "wrapped search" of search engine
@@ -229,6 +230,7 @@ Actions work with props of Find/Replace dialog, and props of low-level search en
 ** "op_case_d": option "case sensitive" of dialog, None if dialog not inited
 ** "op_word_d": option "whole words" of dialog, None if dialog not inited
 ** "op_regex_d": option "reg.ex." of dialog, None if dialog not inited
+** "op_regex_subst_d": option "reg.ex. substitute in 'Replace with' field" of dialog, None if dialog not inited
 ** "op_cfm_d": option "confirm on replace" of dialog, None if dialog not inited
 ** "op_insel_d": option "in selection" of dialog, None if dialog not inited
 ** "op_wrap_d": option "wrapped search" of dialog, None if dialog not inited
@@ -673,26 +675,26 @@ Shows given text in the floating tooptip.
 
 ===dlg_input===
 
- dlg_input(label, text)
+ dlg_input(prompt, text)
 
 Shows modal dialog to input one string. Returns entered string or None if cancelled.
 
-* Param "label": prompt text above input field.
-* Param "text": initial value of input field.
+* Param "prompt": Description text above the input field. It can be multi-line ("\n"-separated) and can have long line(s).
+* Param "text": Initial value of the input field.
 
 ===dlg_input_ex===
 
  dlg_input_ex(number, caption,
-               label1   , text1="", label2="", text2="", label3="", text3="",
-               label4="", text4="", label5="", text5="", label6="", text6="",
-               label7="", text7="", label8="", text8="", label9="", text9="",
-               label10="", text10="")
+               prompt1   , text1="", prompt2="", text2="", prompt3="", text3="",
+               prompt4="", text4="", prompt5="", text5="", prompt6="", text6="",
+               prompt7="", text7="", prompt8="", text8="", prompt9="", text9="",
+               prompt10="", text10="")
 
 Shows modal dialog to enter 1 to 10 string fields at once. Returns list of strings or None if cancelled.
 
-* Param "number": count of input fields.
-* Params "label": prompt text above input field.
-* Params "text": initial value of input field.
+* Param "number": Count of input fields.
+* Params "prompt*": Descriptions near input fields. They cannot be multi-line.
+* Params "text*": Initial values of input fields.
 
 ===dlg_file===
 
@@ -4513,5 +4515,8 @@ Good example is "HTML Class Complete": https://github.com/CudaText-addons/cuda_h
 
 1.0.413 (app 1.148.1)
 * add: dlg_proc: new control "scrollbox"
+
+1.0.414 (app 1.149.4)
+* add: app_proc: PROC_GET_FINDER_PROP/PROC_SET_FINDER_PROP support new keys "op_regex_subst", "op_regex_subst_d"
 
 [[Category:CudaText]]

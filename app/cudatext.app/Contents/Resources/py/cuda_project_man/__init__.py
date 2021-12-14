@@ -25,6 +25,23 @@ def _file_open(fn, options=''):
     #print('Opening file in group %d'%gr)
     file_open(fn, group=gr, options=options)
 
+# https://stackoverflow.com/questions/377017/test-if-executable-exists-in-python
+def which(program):
+    def is_exe(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+
+    return None
+
 def project_variables():
     """
     gives dict with "project variables", which is ok for using from other plugins,
@@ -151,6 +168,9 @@ class Command:
         (_("New directory...")     , "dir", [NODE_DIR], "cuda_project_man.action_new_directory"),
         (_("Find in directory...") , "dir", [NODE_DIR], "cuda_project_man.action_find_in_directory"),
 
+        (_("Open in default application")
+                                   , "file", [NODE_FILE], "cuda_project_man.action_open_def"),
+        (_("Focus in file manager"), "file", [NODE_FILE], "cuda_project_man.action_focus_in_fileman"),
         (_("Rename...")            , "file", [NODE_FILE], "cuda_project_man.action_rename"),
         (_("Delete file")          , "file", [NODE_FILE], "cuda_project_man.action_delete_file"),
         (_("Set as main file")     , "file", [NODE_FILE], "cuda_project_man.action_set_as_main_file"),
@@ -410,6 +430,53 @@ class Command:
         self.jump_to_filename(str(path))
         if os.path.isfile(str(path)):
             _file_open(str(path))
+
+    def action_open_def(self):
+        fn = str(self.get_location_by_index(self.selected))
+        if not os.path.isfile(fn):
+            return
+        suffix = app_proc(PROC_GET_OS_SUFFIX, '')
+        if suffix=='':
+            #Windows
+            os.startfile(fn)
+        elif suffix=='__mac':
+            #macOS
+            os.system('open "'+fn+'"')
+        elif suffix=='__haiku':
+            #Haiku
+            msg_status('TODO: implemenet "Open in default app" for Haiku')
+        else:
+            #other Unixes
+            os.system('xdg-open "'+fn+'"')
+
+    def action_focus_in_fileman(self):
+        fn = str(self.get_location_by_index(self.selected))
+        if not os.path.isfile(fn):
+            return
+        suffix = app_proc(PROC_GET_OS_SUFFIX, '')
+
+        if suffix=='':
+            #Windows
+            os.system('explorer.exe /select,'+fn)
+        elif suffix=='__mac':
+            #macOS
+            fn = fn.replace(' ', '\\ ') #macOS cannot handle quoted filename
+            os.system('open --new --reveal '+fn)
+        elif suffix=='__haiku':
+            #Haiku
+            msg_status('"Focus in file manager" not implemented for this OS')
+        else:
+            #Linux and others
+            if which('nautilus'):
+                os.system('nautilus "'+fn+'"')
+            elif which('thunar'):
+                os.system('thunar "'+os.path.dirname(fn)+'"')
+            elif which('caja'):
+                os.system('caja "'+os.path.dirname(fn)+'"')
+            elif which('dolphin'):
+                os.system('dolphin --select --new-window "'+fn+'"')
+            else:
+                msg_status('"Focus in file manager" does not support your file manager')
 
     def action_rename(self):
         location = Path(self.get_location_by_index(self.selected))

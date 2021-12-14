@@ -23,8 +23,8 @@ begin
           UiOps.FindIndentHorz,
           UiOps.FindIndentVert,
           true,
-          true
-          );
+          true,
+          true);
       end;
 
     markingSelections:
@@ -180,6 +180,7 @@ begin
     FFinder.OptCase:= chkCase.Checked;
     FFinder.OptWords:= chkWords.Checked;
     FFinder.OptRegex:= chkRegex.Checked;
+    FFinder.OptRegexSubst:= chkRegexSubst.Checked;
     FFinder.OptWrapped:= chkWrap.Checked;
     FFinder.OptInSelection:= chkInSel.Checked;
     FFinder.OptFromCaret:= (Res=afoFindNext) or (Res=afoFindPrev) or (Res=afoReplace);
@@ -379,7 +380,11 @@ begin
   //make workaround
   if (Res=afoReplaceAll) or
      (Res=afoReplaceGlobal) then
-    CurrentFrame.SetFocus;
+  begin
+    Frame:= CurrentFrame;
+    if Assigned(Frame) then
+      Frame.SetFocus;
+  end;
   {$endif}
 end;
 
@@ -430,6 +435,7 @@ begin
           FormPosSetFromString(fmFind, cfg.GetValue('/pos/find', ''), false);
         fmFind.IsMultiLine:= cfg.GetValue('/finder/mline', false);
         fmFind.IsHiAll:= cfg.GetValue('/finder/hi', false);
+        fmFind.chkRegexSubst.Checked:= cfg.GetValue('/finder/regex_subst', true);
       except
       end;
     finally
@@ -541,13 +547,18 @@ begin
 end;
 
 procedure TfmMain.DoDialogFind_Hide;
+var
+  Frame: TEditorFrame;
 begin
   if Assigned(fmFind) and fmFind.Visible then
   begin
     //handy to reset in-sel, on closing dialog
     FFinder.OptInSelection:= false;
 
-    CurrentFrame.SetFocus;
+    Frame:= CurrentFrame;
+    if Assigned(Frame) then
+      Frame.SetFocus;
+
     fmFind.Hide;
     UpdateAppForSearch(false, false, true, true);
   end;
@@ -774,6 +785,7 @@ begin
       AFinder.IndentHorz,
       AFinder.IndentVert,
       true,
+      true,
       true);
   end
   else
@@ -824,7 +836,7 @@ begin
   if Callback='' then exit;
 
   Ed.DoCaretSingle(APos1.X, APos1.Y, APos2.X, APos2.Y);
-  Ed.DoShowPos(APos1, ThisFinder.IndentHorz, ThisFinder.IndentVert, true, false);
+  Ed.DoShowPos(APos1, ThisFinder.IndentHorz, ThisFinder.IndentVert, true, false, true);
   Ed.Update(true);
 
   SetLength(Params, 5);
@@ -1016,7 +1028,7 @@ function TfmMain.DoFindOptions_GetDict: PPyObject;
 var
   oFind, oRep,
   oFindHist, oRepHist,
-  bCase, bWord, bRegex, bCfm,
+  bCase, bWord, bRegex, bRegexSubst, bCfm,
   bInSel, bWrap, bMulLine, bHiAll, oTokens: PPyObject;
 begin
   with AppPython.Engine do
@@ -1031,6 +1043,7 @@ begin
     bCase:= ReturnNone;
     bWord:= ReturnNone;
     bRegex:= ReturnNone;
+    bRegexSubst:= ReturnNone;
     bCfm:= ReturnNone;
     bInSel:= ReturnNone;
     bWrap:= ReturnNone;
@@ -1047,6 +1060,7 @@ begin
       bCase:= PyBool_FromLong(Ord(fmFind.chkCase.Checked));
       bWord:= PyBool_FromLong(Ord(fmFind.chkWords.Checked));
       bRegex:= PyBool_FromLong(Ord(fmFind.chkRegex.Checked));
+      bRegexSubst:= PyBool_FromLong(Ord(fmFind.chkRegexSubst.Checked));
       bCfm:= PyBool_FromLong(Ord(fmFind.chkConfirm.Checked));
       bInSel:= PyBool_FromLong(Ord(fmFind.chkInSel.Checked));
       bWrap:= PyBool_FromLong(Ord(fmFind.chkWrap.Checked));
@@ -1055,7 +1069,7 @@ begin
       oTokens:= PyLong_FromLong(Ord(fmFind.bTokens.ItemIndex));
     end;
 
-    Result:= Py_BuildValue('{sOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsO}',
+    Result:= Py_BuildValue('{sOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsO}',
       'find', PyUnicodeFromString(FFinder.StrFind),
       'rep', PyUnicodeFromString(FFinder.StrReplace),
 
@@ -1068,6 +1082,7 @@ begin
       'op_back', PyBool_FromLong(Ord(FFinder.OptBack)),
       'op_word', PyBool_FromLong(Ord(FFinder.OptWords)),
       'op_regex', PyBool_FromLong(Ord(FFinder.OptRegex)),
+      'op_regex_subst', PyBool_FromLong(Ord(FFinder.OptRegexSubst)),
       'op_cfm', PyBool_FromLong(Ord(FFinder.OptConfirmReplace)),
       'op_fromcaret', PyBool_FromLong(Ord(FFinder.OptFromCaret)),
       'op_insel', PyBool_FromLong(Ord(FFinder.OptInSelection)),
@@ -1077,6 +1092,7 @@ begin
       'op_case_d', bCase,
       'op_word_d', bWord,
       'op_regex_d', bRegex,
+      'op_regex_subst_d', bRegexSubst,
       'op_cfm_d', bCfm,
       'op_insel_d', bInSel,
       'op_wrap_d', bWrap,
@@ -1166,6 +1182,8 @@ begin
         FFinder.OptWords:= AppStrToBool(SValue);
       'op_regex':
         FFinder.OptRegex:= AppStrToBool(SValue);
+      'op_regex_subst':
+        FFinder.OptRegexSubst:= AppStrToBool(SValue);
       'op_cfm':
         FFinder.OptConfirmReplace:= AppStrToBool(SValue);
       'op_fromcaret':
@@ -1200,6 +1218,15 @@ begin
           if Assigned(fmFind) then
           begin
             fmFind.chkRegex.Checked:= AppStrToBool(SValue);
+            fmFind.UpdateState(false);
+            fmFind.DoOnChange;
+          end;
+        end;
+      'op_regex_subst_d':
+        begin
+          if Assigned(fmFind) then
+          begin
+            fmFind.chkRegexSubst.Checked:= AppStrToBool(SValue);
             fmFind.UpdateState(false);
             fmFind.DoOnChange;
           end;
@@ -1296,6 +1323,7 @@ begin
     FFinder.OptCase:= chkCase.Checked;
     FFinder.OptWords:= chkWords.Checked;
     FFinder.OptRegex:= chkRegex.Checked;
+    FFinder.OptRegexSubst:= chkRegexSubst.Checked;
     FFinder.OptWrapped:= chkWrap.Checked;
     FFinder.OptInSelection:= chkInSel.Checked;
     FFinder.OptConfirmReplace:= chkConfirm.Checked;

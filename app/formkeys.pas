@@ -208,19 +208,11 @@ procedure TfmKeys.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState
 begin
   if not panelPress.Visible then exit;
 
-  if
-    (key=VK_MENU) or
-    (key=VK_LMENU) or
-    (key=VK_RMENU) or
-    (key=VK_CONTROL) or
-    (key=VK_LCONTROL) or
-    (key=VK_RCONTROL) or
-    (key=VK_SHIFT) or
-    (key=VK_LSHIFT) or
-    (key=VK_RSHIFT) or
-    (key=VK_LWIN) or
-    (key=VK_RWIN) then
-      begin key:= 0; exit end;
+  if not AppKeyIsAllowedAsCustomHotkey(Key, Shift) then
+  begin
+    Key:= 0;
+    exit
+  end;
 
   FKeyPressed:= ShortCut(Key, Shift);
   key:= 0;

@@ -113,6 +113,7 @@ type
     bRepGlobal: TATButton;
     chkCase: TATButton;
     chkConfirm: TATButton;
+    chkRegexSubst: TATButton;
     chkInSel: TATButton;
     chkHiAll: TATButton;
     chkMulLine: TATButton;
@@ -148,6 +149,7 @@ type
     procedure chkInSelClick(Sender: TObject);
     procedure chkMulLineClick(Sender: TObject);
     procedure chkRegexClick(Sender: TObject);
+    procedure chkRegexSubstClick(Sender: TObject);
     procedure chkRepChange(Sender: TObject);
     procedure bFindFirstClick(Sender: TObject);
     procedure chkRepClick(Sender: TObject);
@@ -177,6 +179,7 @@ type
     FMenuitemOptTokens: TMenuItem;
     FMenuitemOptTokensSub: array[TATFinderTokensAllowed] of TMenuItem;
     FMenuitemOptHiAll: TMenuItem;
+    FMenuitemOptRegexSubst: TMenuItem;
     FMenuitemFindFirst: TMenuItem;
     FMenuitemFindPrev: TMenuItem;
     FMenuitemFindNext: TMenuItem;
@@ -304,6 +307,14 @@ begin
   DoOnChange;
 end;
 
+procedure TfmFind.chkRegexSubstClick(Sender: TObject);
+begin
+  with chkRegexSubst do
+    Checked:= not Checked;
+  UpdateState(false);
+  DoOnChange;
+end;
+
 procedure TfmFind.bRepClick(Sender: TObject);
 begin
   if IsReplace then
@@ -342,14 +353,6 @@ const
 var
   fn: string;
   ini: TIniFile;
-  SCaptionOptRegex,
-  SCaptionOptCase,
-  SCaptionOptWords,
-  SCaptionOptWrapped,
-  SCaptionOptInSel,
-  SCaptionOptMulti,
-  SCaptionOptTokens,
-  SCaptionOptHiAll,
   SCaptionFindFirst,
   SCaptionFindPrev,
   SCaptionFindNext,
@@ -366,14 +369,6 @@ var
   Sep3: TMenuItem;
   kind: TATFinderTokensAllowed;
 begin
-  SCaptionOptRegex:= 'Regular expression';
-  SCaptionOptCase:= 'Case sensitive';
-  SCaptionOptWords:= 'Whole words';
-  SCaptionOptWrapped:= 'Wrapped search';
-  SCaptionOptInSel:= 'Search in selection';
-  SCaptionOptMulti:= 'Multi-line inputs';
-  SCaptionOptTokens:= 'Allowed syntax elements';
-  SCaptionOptHiAll:= 'Highlight all matches';
   SCaptionFindFirst:= 'Find first';
   SCaptionFindPrev:= 'Find previous';
   SCaptionFindNext:= 'Find next';
@@ -391,14 +386,6 @@ begin
   begin
     ini:= TIniFile.Create(fn);
     try
-      SCaptionOptRegex:= ini.ReadString(section, 'h_re', SCaptionOptRegex);
-      SCaptionOptCase:= ini.ReadString(section, 'h_ca', SCaptionOptCase);
-      SCaptionOptWords:= ini.ReadString(section, 'h_wo', SCaptionOptWords);
-      SCaptionOptWrapped:= ini.ReadString(section, 'h_wr', SCaptionOptWrapped);
-      SCaptionOptInSel:= ini.ReadString(section, 'h_sel', SCaptionOptInSel);
-      SCaptionOptMulti:= ini.ReadString(section, 'h_mul', SCaptionOptMulti);
-      SCaptionOptTokens:= ini.ReadString(section, 'h_tok', SCaptionOptTokens);
-      SCaptionOptHiAll:= ini.ReadString(section, 'h_hi', SCaptionOptHiAll);
       SCaptionFindFirst:= ini.ReadString(section, 'h_f1', SCaptionFindFirst);
       SCaptionFindPrev:= ini.ReadString(section, 'h_fp', SCaptionFindPrev);
       SCaptionFindNext:= ini.ReadString(section, 'h_fn', SCaptionFindNext);
@@ -450,6 +437,9 @@ begin
     FMenuitemOptHiAll:= TMenuItem.Create(Self);
     FMenuitemOptHiAll.OnClick:= @chkHiAllClick;
 
+    FMenuitemOptRegexSubst:= TMenuItem.Create(Self);
+    FMenuitemOptRegexSubst.OnClick:= @chkRegexSubstClick;
+
     FMenuitemFindFirst:= TMenuItem.Create(Self);
     FMenuitemFindFirst.OnClick:= @bFindFirstClick;
 
@@ -500,6 +490,7 @@ begin
     FPopupMore.Items.Add(FMenuitemOptMulti);
     FPopupMore.Items.Add(FMenuitemOptTokens);
     FPopupMore.Items.Add(FMenuitemOptHiAll);
+    FPopupMore.Items.Add(FMenuitemOptRegexSubst);
     FPopupMore.Items.Add(Sep1);
     FPopupMore.Items.Add(FMenuitemFindFirst);
     FPopupMore.Items.Add(FMenuitemFindPrev);
@@ -516,34 +507,38 @@ begin
     FPopupMore.Items.Add(FMenuitemRepGlobal);
   end;
 
-  FMenuitemOptRegex.Caption:= SCaptionOptRegex;
+  FMenuitemOptRegex.Caption:= msgFindHint_Regex;
   FMenuitemOptRegex.Checked:= chkRegex.Checked;
   FMenuitemOptRegex.ShortCut:= TextToShortCut(UiOps.HotkeyToggleRegex);
-  FMenuitemOptCase.Caption:= SCaptionOptCase;
+  FMenuitemOptCase.Caption:= msgFindHint_Case;
   FMenuitemOptCase.Checked:= chkCase.Checked;
   FMenuitemOptCase.ShortCut:= TextToShortCut(UiOps.HotkeyToggleCaseSens);
-  FMenuitemOptWords.Caption:= SCaptionOptWords;
+  FMenuitemOptWords.Caption:= msgFindHint_Words;
   FMenuitemOptWords.Checked:= chkWords.Checked;
   FMenuitemOptWords.ShortCut:= TextToShortCut(UiOps.HotkeyToggleWords);
-  FMenuitemOptWrapped.Caption:= SCaptionOptWrapped;
+  FMenuitemOptWrapped.Caption:= msgFindHint_Wrapped;
   FMenuitemOptWrapped.Checked:= chkWrap.Checked;
   FMenuitemOptWrapped.ShortCut:= TextToShortCut(UiOps.HotkeyToggleWrapped);
-  FMenuitemOptInSel.Caption:= SCaptionOptInSel;
+  FMenuitemOptInSel.Caption:= msgFindHint_InSelect;
   FMenuitemOptInSel.Checked:= chkInSel.Checked;
   FMenuitemOptInSel.ShortCut:= TextToShortCut(UiOps.HotkeyToggleInSelect);
-  FMenuitemOptMulti.Caption:= SCaptionOptMulti;
+  FMenuitemOptMulti.Caption:= msgFindHint_MultiLine;
   FMenuitemOptMulti.Checked:= chkMulLine.Checked;
   FMenuitemOptMulti.ShortCut:= TextToShortCut(UiOps.HotkeyToggleMultiline);
-  FMenuitemOptTokens.Caption:= SCaptionOptTokens;
+  FMenuitemOptTokens.Caption:= msgFindHint_Tokens;
   FMenuitemOptTokens.ShortCut:= TextToShortCut(UiOps.HotkeyToggleTokens);
   for kind in TATFinderTokensAllowed do
   begin
     FMenuitemOptTokensSub[kind].Caption:= bTokens.Items[Ord(kind)];
     FMenuitemOptTokensSub[kind].Checked:= bTokens.ItemIndex=Ord(kind);
   end;
-  FMenuitemOptHiAll.Caption:= SCaptionOptHiAll;
+  FMenuitemOptHiAll.Caption:= msgFindHint_HiAll;
   FMenuitemOptHiAll.Checked:= chkHiAll.Checked;
   FMenuitemOptHiAll.ShortCut:= TextToShortCut(UiOps.HotkeyToggleHiAll);
+
+  FMenuitemOptRegexSubst.Caption:= msgFindHint_RegexSubst;
+  FMenuitemOptRegexSubst.Checked:= chkRegexSubst.Checked;
+  FMenuitemOptRegexSubst.Enabled:= IsReplace and chkRegex.Checked;
 
   FMenuitemFindFirst.Caption:= SCaptionFindFirst;
   FMenuitemFindFirst.ShortCut:= TextToShortCut(UiOps.HotkeyFindFirst);
@@ -561,12 +556,16 @@ begin
   FMenuitemMarkAll.Shortcut:= TextToShortcut(UiOps.HotkeyMarkAll);
   FMenuitemRep.Caption:= SCaptionRep;
   FMenuitemRep.Shortcut:= TextToShortcut(UiOps.HotkeyReplaceAndFindNext);
+  FMenuitemRep.Enabled:= IsReplace;
   FMenuitemRepStop.Caption:= SCaptionRepStop;
   FMenuitemRepStop.Shortcut:= TextToShortcut(UiOps.HotkeyReplaceNoFindNext);
+  FMenuitemRepStop.Enabled:= IsReplace;
   FMenuitemRepAll.Caption:= SCaptionRepAll;
   FMenuitemRepAll.Shortcut:= TextToShortcut(UiOps.HotkeyReplaceAll);
+  FMenuitemRepAll.Enabled:= IsReplace;
   FMenuitemRepGlobal.Caption:= SCaptionRepGlobal;
   FMenuitemRepGlobal.Shortcut:= TextToShortcut(UiOps.HotkeyReplaceGlobal);
+  FMenuitemRepGlobal.Enabled:= IsReplace;
 end;
 
 procedure TfmFind.MenuitemTokensClick(Sender: TObject);
@@ -799,6 +798,8 @@ begin
   bTokens.ItemIndex:= 0;
   bTokens.Checkable:= true;
 
+  chkRegexSubst.Checked:= true;
+
   Adapter:= TATAdapterEControl.Create(Self);
   Adapter.Lexer:= AppManager.FindLexerByName('RegEx');
 end;
@@ -860,7 +861,7 @@ begin
   Str:= ShortcutToText(KeyToShortCut(Key, Shift));
   if Str='' then exit; //only Shift is pressed
 
-  if Key=VK_ESCAPE then
+  if (Key=VK_ESCAPE) and (Shift=[]) then
   begin
     DoResult(afoCloseDlg);
     key:= 0;
@@ -1224,6 +1225,8 @@ begin
     chkHiAll.Parent:= PanelTopOps;
     chkConfirm.Parent:= PanelTopOps;
     chkConfirm.Left:= 400; //to right
+    chkRegexSubst.Parent:= PanelTopOps;
+    chkRegexSubst.Left:= chkConfirm.Left+80; //to right
   end;
 
   PanelTopOps.Left:= edFind.Left;
@@ -1334,6 +1337,7 @@ begin
   chkInSel.Enabled:= bEnabled and not FForViewer;
   chkMulLine.Enabled:= bEnabled;
   chkConfirm.Enabled:= bEnabled and IsReplace and not FForViewer;
+  chkRegexSubst.Enabled:= bEnabled and IsReplace and not FForViewer and chkRegex.Checked;
   bTokens.Enabled:= bEnabled and not FForViewer;
 
   bFindFirst.Visible:= UiOps.FindShow_FindFirst;
@@ -1351,6 +1355,7 @@ begin
   bTokens.Visible:= UiOps.FindShow_SyntaxElements;
   chkHiAll.Visible:= UiOps.FindShow_HiAll;
   chkConfirm.Visible:= (IsReplace or IsNarrow) and UiOps.FindShow_ConfirmRep;
+  chkRegexSubst.Visible:= (IsReplace or IsNarrow) and UiOps.FindShow_RegexSubst;
   ControlAutosizeOptionsByWidth;
 
   edFind.Left:= cPadding;
@@ -1438,6 +1443,7 @@ begin
       msgFindHint_RepAll:= ini.ReadString(section, 'h_r_a', msgFindHint_RepAll);
       msgFindHint_RepGlobal:= ini.ReadString(section, 'h_r_g', msgFindHint_RepGlobal);
       msgFindHint_Regex:= ini.ReadString(section, 'h_re', msgFindHint_Regex);
+      msgFindHint_RegexSubst:= ini.ReadString(section, 'h_subs', msgFindHint_RegexSubst);
       msgFindHint_Case:= ini.ReadString(section, 'h_ca', msgFindHint_Case);
       msgFindHint_Words:= ini.ReadString(section, 'h_wo', msgFindHint_Words);
       msgFindHint_Wrapped:= ini.ReadString(section, 'h_wr', msgFindHint_Wrapped);
@@ -1471,6 +1477,7 @@ begin
   bRepGlobal.Hint:= _MakeHint(msgFindHint_RepGlobal, UiOps.HotkeyReplaceGlobal);
 
   chkRegex.Hint:= _MakeHint(msgFindHint_Regex, UiOps.HotkeyToggleRegex);
+  chkRegexSubst.Hint:= _MakeHint(msgFindHint_RegexSubst, '');
   chkCase.Hint:= _MakeHint(msgFindHint_Case, UiOps.HotkeyToggleCaseSens);
   chkWords.Hint:= _MakeHint(msgFindHint_Words, UiOps.HotkeyToggleWords);
   chkWrap.Hint:= _MakeHint(msgFindHint_Wrapped, UiOps.HotkeyToggleWrapped);

@@ -1,4 +1,4 @@
-object SyntAnal7: TLibSyntAnalyzer
+object SyntAnal6: TLibSyntAnalyzer
   Formats = <
     item
       DisplayName = 'Style'
@@ -159,10 +159,10 @@ object SyntAnal7: TLibSyntAnalyzer
       ColumnTo = 0
     end
     item
-      DisplayName = 'String in func'
+      DisplayName = 'URL w/o quotes'
       StyleName = 'String'
       TokenType = 4
-      Expression = '(?<=url \x20* \() .*? (?=\))'
+      Expression = '(?-i)(?<=\burl\x20*\() [^\)\n\r]+'
       ColumnFrom = 0
       ColumnTo = 0
     end
@@ -235,6 +235,14 @@ object SyntAnal7: TLibSyntAnalyzer
       ColumnTo = 0
     end
     item
+      DisplayName = 'PHP tag'
+      StyleName = 'PHP tag'
+      TokenType = 8
+      Expression = '<\?php | <\? | \?>'
+      ColumnFrom = 0
+      ColumnTo = 0
+    end
+    item
       DisplayName = '@Property'
       StyleName = 'Media'
       TokenType = 11
@@ -271,7 +279,7 @@ object SyntAnal7: TLibSyntAnalyzer
       DisplayName = 'Style'
       StyleName = 'Style'
       TokenType = 2
-      Expression = '\-[\w\-]+ | [\w\#\.][\w\-]*'
+      Expression = '\-[\w\-]+ | [\w\#\.](\\.|[\w\-])*'
       ColumnFrom = 0
       ColumnTo = 0
     end
@@ -279,15 +287,7 @@ object SyntAnal7: TLibSyntAnalyzer
       DisplayName = 'Symbol'
       StyleName = 'Symbol'
       TokenType = 3
-      Expression = '[;:,%\(\)\[\]@=/\*>\-\+!\^\$\|~]'
-      ColumnFrom = 0
-      ColumnTo = 0
-    end
-    item
-      DisplayName = 'PHP tag'
-      StyleName = 'PHP tag'
-      TokenType = 8
-      Expression = '<\?php | <\? | \?>'
+      Expression = '\]\]> | [;:,%\(\)\[\]@=/\*<>\-\+!\^\$\|~]'
       ColumnFrom = 0
       ColumnTo = 0
     end>
@@ -330,6 +330,8 @@ object SyntAnal7: TLibSyntAnalyzer
             'animation-play-state'
             'animation-timing-function'
             'antialiased'
+            'ascent-override'
+            'aspect-ratio'
             'auto'
             'auto-pos'
             'available'
@@ -494,6 +496,7 @@ object SyntAnal7: TLibSyntAnalyzer
             'decimal'
             'default'
             'dense'
+            'descent-override'
             'diagonal-fractions'
             'difference'
             'digits'
@@ -696,6 +699,7 @@ object SyntAnal7: TLibSyntAnalyzer
             'line-break'
             'line-clamp'
             'line-edge'
+            'line-gap-override'
             'line-height'
             'line-through'
             'lining-nums'
@@ -982,6 +986,7 @@ object SyntAnal7: TLibSyntAnalyzer
             'sideways-rl'
             'simplified'
             'size'
+            'size-adjust'
             'slashed-zero'
             'slice'
             'small'
@@ -1345,7 +1350,6 @@ object SyntAnal7: TLibSyntAnalyzer
             'rule-width'
             'shadow'
             'size'
-            'size-adjust'
             'sizing'
             'space'
             'space-collapse'
@@ -2348,7 +2352,7 @@ object SyntAnal7: TLibSyntAnalyzer
       DisplayName = 'PHP'
       StartExpression = '<\?(php)?'
       EndExpression = '\?>'
-      SyntAnalyzer = SyntAnal16
+      SyntAnalyzer = SyntAnal15
     end>
   SampleText.Strings = (
     '/* Comment */'

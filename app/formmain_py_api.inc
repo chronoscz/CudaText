@@ -2967,7 +2967,7 @@ begin
       'max', AInfo.NMax,
       'page', AInfo.NPage,
       'pixels', AInfo.NPixelOffset,
-      'char_size', AInfo.SmoothCharSize,
+      'char_size', AInfo.CharSizeScaled div ATEditorCharXScale,
       'smooth_pos', AInfo.SmoothPos,
       'smooth_pos_last', AInfo.SmoothPosLast,
       'smooth_max', AInfo.SmoothMax,
@@ -3441,7 +3441,7 @@ begin
 
         PROP_CELL_SIZE:
           begin
-            Result:= Py_BuildValue('(ii)', Ed.TextCharSize.X, Ed.TextCharSize.Y);
+            Result:= Py_BuildValue('(ii)', Ed.TextCharSize.XScaled div ATEditorCharXScale, Ed.TextCharSize.Y);
           end;
 
         PROP_MODERN_SCROLLBAR:
@@ -4258,7 +4258,7 @@ begin
               begin
                 Str:= F.FileName;
                 F.DoFileClose;
-                F.DoFileOpen(Str, '', false, true, true, true, cOpenModeEditor);
+                F.DoFileOpen(Str, '', false, false, true, true, true, cOpenModeEditor);
               end;
             end
             else
@@ -4615,7 +4615,7 @@ begin
 
         APP_PROC_SAVE_SESSION:
           begin
-            ParamBool:= fmMain.DoOps_SaveSession(Str, true);
+            ParamBool:= fmMain.DoOps_SaveSession(Str, true, false);
             Result:= PyBool_FromLong(Ord(ParamBool));
           end;
 
@@ -8024,7 +8024,7 @@ begin
             Sep.GetItemInt(N2, 0);
             if (NX>=0) and Ed.Strings.IsIndexValid(NY) then
             begin
-              ok:= Ed.DoShowPos(Point(NX, NY), N1, N2, true, true);
+              ok:= Ed.DoShowPos(Point(NX, NY), N1, N2, true, true, true);
               Result:= PyBool_FromLong(Ord(ok));
             end
             else
@@ -9585,7 +9585,7 @@ begin
 
               if bSetCaret then
               begin
-                Finder.Editor.DoShowPos(Pnt1, Finder.IndentHorz, Finder.IndentVert, true, false);
+                Finder.Editor.DoShowPos(Pnt1, Finder.IndentHorz, Finder.IndentVert, true, false, true);
                 Finder.Editor.Update;
               end;
 
@@ -9612,7 +9612,7 @@ begin
                 PntAfter:= Point(-1, -1);
 
               if bSetCaret then
-                Finder.Editor.DoShowPos(Pnt1, Finder.IndentHorz, Finder.IndentVert, true, false);
+                Finder.Editor.DoShowPos(Pnt1, Finder.IndentHorz, Finder.IndentVert, true, false, true);
 
               if bSetCaret or bChanged then
                 Finder.Editor.Update(bChanged);
