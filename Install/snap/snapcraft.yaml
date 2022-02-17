@@ -63,10 +63,10 @@ parts:
     - wget
     - libgtk2.0-dev
     override-build: |
-      wget -nc https://deac-ams.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.0.12/lazarus-project_2.0.12-0_amd64.deb
-      wget -nc https://netix.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.0.12/fpc-laz_3.2.0-1_amd64.deb
-      wget -nc https://netix.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.0.12/fpc-src_3.2.0-1_amd64.deb
-      apt install ./lazarus-project_2.0.12-0_amd64.deb ./fpc-laz_3.2.0-1_amd64.deb ./fpc-src_3.2.0-1_amd64.deb
+      wget -nc https://deac-ams.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.2.0/lazarus-project_2.2.0-0_amd64.deb
+      wget -nc https://netix.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.2.0/fpc-laz_3.2.2-210709_amd64.deb
+      wget -nc https://netix.dl.sourceforge.net/project/lazarus/Lazarus%20Linux%20amd64%20DEB/Lazarus%202.2.0/fpc-src_3.2.2-210709_amd64.deb
+      apt install ./lazarus-project_2.2.0-0_amd64.deb ./fpc-laz_3.2.2-210709_amd64.deb ./fpc-src_3.2.2-210709_amd64.deb
     prime: [-*]
   cudatext:
     after:
@@ -83,11 +83,12 @@ parts:
       install -d -m 755 $SNAPCRAFT_PART_INSTALL/usr/share/applications
       install -m 755 Install/snap/local/CudaText.desktop $SNAPCRAFT_PART_INSTALL/usr/share/applications
       install -d -m 755 $SNAPCRAFT_PART_INSTALL/usr/share/pixmaps
-      install -m 644 Install/snap/local/CudaText.png $SNAPCRAFT_PART_INSTALL/usr/share/pixmaps      
+      install -m 644 Install/snap/local/CudaText.png $SNAPCRAFT_PART_INSTALL/usr/share/pixmaps
       install -d -m 755 $SNAPCRAFT_PART_INSTALL/usr/share/cudatext/data
       cp -r app/data $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
       cp -r app/py $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
       cp -r app/settings_default $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
+      install -m 644 Install/snap/local/userinit.json $SNAPCRAFT_PART_INSTALL/usr/share/cudatext/settings_default
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/themes
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons
       mkdir -p $SNAPCRAFT_PART_INSTALL/share/sounds
@@ -99,7 +100,7 @@ parts:
     - usr/share/pixmaps
     stage-packages:
     - libgtk2.0-0
-    - python3
+    - libpython3.8
 
   desktop-gtk2:
     source: https://github.com/ubuntu/snapcraft-desktop-helpers.git
@@ -155,7 +156,7 @@ apps:
   cudatext:
     command: usr/bin/cudatext
     command-chain:
-    - bin/desktop-launch    
+    - bin/desktop-launch
     desktop: usr/share/applications/CudaText.desktop
     plugs:
     - desktop
@@ -165,3 +166,5 @@ apps:
 layout:
   /usr/share/cudatext:
     bind: $SNAP/usr/share/cudatext
+  /usr/lib/$SNAPCRAFT_ARCH_TRIPLET/libpython3.8.so:
+    bind-file: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/libpython3.8.so.1.0   
