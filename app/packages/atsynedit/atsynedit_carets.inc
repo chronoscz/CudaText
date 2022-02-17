@@ -705,7 +705,7 @@ begin
   Result:= false;
 
   //allow big values - make centering vertically
-  if Abs(AIndentVert)>=cMaxIndentVert then
+  if Abs(AIndentVert)>=100 then
     AIndentVert:= GetVisibleLines div 2;
 
   if AUnfold then
@@ -917,7 +917,10 @@ end;
 procedure TATSynEdit.SetCaretsArray(const Ar: TATPointArray);
 begin
   if Assigned(FCarets) then
+  begin
     FCarets.AsArray:= Ar;
+    DoCaretsFixIncorrectPos(false);
+  end;
 end;
 
 procedure TATSynEdit.SetMarkersArray(const Ar: TATInt64Array);
@@ -1133,12 +1136,14 @@ end;
 
 function TATSynEdit.DoCaretsFixIncorrectPos(AndLimitByLineEnds: boolean): boolean;
 var
+  St: TATStrings;
   Caret: TATCaretItem;
   NLast, NLen, i: integer;
 begin
   Result:= false;
+  St:= Strings;
 
-  NLast:= Strings.Count-1;
+  NLast:= St.Count-1;
   if NLast<0 then
   begin
     Result:= true;
@@ -1151,7 +1156,7 @@ begin
     Caret:= Carets[i];
 
     //fix position
-    if not Strings.IsIndexValid(Caret.PosY) then
+    if not St.IsIndexValid(Caret.PosY) then
     begin
       Result:= true;
       Caret.PosY:= NLast;
@@ -1161,7 +1166,7 @@ begin
 
     if AndLimitByLineEnds or not FCaretVirtual then
     begin
-      NLen:= Strings.LinesLen[Caret.PosY];
+      NLen:= St.LinesLen[Caret.PosY];
       if Caret.PosX>NLen then
       begin
         Result:= true;
@@ -1172,12 +1177,12 @@ begin
     //fix selection end
     if Caret.EndY>=0 then
     begin
-      if not Strings.IsIndexValid(Caret.EndY) then
+      if not St.IsIndexValid(Caret.EndY) then
       begin
         Result:= true;
         Caret.EndY:= NLast;
       end;
-      NLen:= Strings.LinesLen[Caret.EndY];
+      NLen:= St.LinesLen[Caret.EndY];
       if Caret.EndX>NLen then
       begin
         Result:= true;
@@ -1319,26 +1324,49 @@ begin
   Result:= Carets.IsAnyCaretInVisibleRect(FRectMain);
 end;
 
-function TATSynEdit.IsCaretFarFromVertEdge: boolean;
+function TATSynEdit.IsCaretFarFromVertEdge(ACommand: integer): boolean;
 var
-  NProximity, NPixels: integer;
+  NProximity, NPixels1, NPixels2: integer;
   Caret: TATCaretItem;
+  bAllowMultiCarets, bMoveDown: boolean;
 begin
   Result:= false;
   NProximity:= GetActualProximityVert;
   if NProximity=0 then exit;
 
-  if Carets.Count<>1 then exit;
-  Caret:= Carets[0];
+  case Carets.Count of
+    0:
+      exit;
+    1:
+      Caret:= Carets[0];
+    else
+      begin
+        IsCommandForMultiCarets(ACommand, bAllowMultiCarets, bMoveDown);
+        if bAllowMultiCarets and bMoveDown then
+          Caret:= Carets[Carets.Count-1]
+        else
+          Caret:= Carets[0];
+      end;
+  end;
+
   if Caret.CoordY=-1 then exit;
 
-  NPixels:= NProximity*FCharSize.Y;
+  NPixels1:= NProximity*FCharSize.Y;
+  NPixels2:= (NProximity+1)*FCharSize.Y;
   Result:=
-    (Abs(Caret.CoordY-FRectMain.Top)>=NPixels) and
-    (Abs(Caret.CoordY-FRectMain.Bottom)>=NPixels);
+    (Abs(Caret.CoordY-FRectMain.Top)>=NPixels1) and
+    (Abs(Caret.CoordY-FRectMain.Bottom)>=NPixels2);
 end;
 
 { TATCaretShape }
+
+function TATCaretShape.IsNarrow: boolean;
+//negative values are in %, positive are in pixels
+begin
+  Result:=
+    ((Width>=-25) and (Width<=2)) or
+    ((Height>=-25) and (Height<=3));
+end;
 
 procedure TATCaretShape.Assign(Obj: TATCaretShape);
 begin

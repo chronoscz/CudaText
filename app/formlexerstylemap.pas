@@ -251,7 +251,7 @@ var
   i: integer;
 begin
   if LexerName='' then exit;
-  with TIniFile.Create(GetAppLexerMapFilename(LexerName)) do
+  with TIniFile.Create(AppFile_LexerMap(LexerName)) do
   try
     EraseSection(cSectionMap);
     for i:= 0 to ItemsLex.Count-1 do
@@ -266,7 +266,7 @@ var
   i: integer;
 begin
   if LexerName='' then exit;
-  with TIniFile.Create(GetAppLexerMapFilename(LexerName)) do
+  with TIniFile.Create(AppFile_LexerMap(LexerName)) do
   try
     for i:= 0 to ItemsLex.Count-1 do
       ItemsVal[i]:= ReadString(cSectionMap, ItemsLex[i], '');
@@ -294,7 +294,7 @@ var
   ini: TIniFile;
   fn: string;
 begin
-  fn:= GetAppLangFilename;
+  fn:= AppFile_Language;
   if not FileExists(fn) then exit;
   ini:= TIniFile.Create(fn);
   try

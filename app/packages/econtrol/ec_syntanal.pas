@@ -11,21 +11,18 @@
 { *************************************************************************** }
 
 {$mode delphi}
-{.$define ParseProgress}
-{.$define ParseTime}
 
 unit ec_SyntAnal;
 
 interface
 
 uses
-  Classes, Graphics, Controls, ExtCtrls,
+  Classes, Graphics, Controls,
   Contnrs, syncobjs,
   ec_RegExpr,
   ec_StrUtils,
   ec_Lists,
   ec_gramma,
-  ec_syntax_item,
   ec_syntax_collection,
   ec_syntax_format,
   ec_syntax_rule,
@@ -33,14 +30,8 @@ uses
   ec_proc_StreamComponent;
 
 type
-  IecSyntClient = interface
-    ['{045EAD6D-5584-4A60-849E-6B8994AA5B8F}']
-    procedure FormatChanged; // Lexer properties changed (update without clear)
-    procedure Finished;      // Compleat analysis
-  end;
-
   TecLineBreakPos = (lbTop, lbBottom);
-  TecLineBreakBound = set of TecLineBreakPos; // for user blocks
+  TecLineBreakBound = set of TecLineBreakPos;
 
   TecSyntAnalyzer       = class;
   TecParserResults      = class;
@@ -48,14 +39,14 @@ type
   TecTagBlockCondition  = class;
   TecSyntaxManager      = class;
   TecSubAnalyzerRule    = class;
-  TecTextRange        = class;
+  TecTextRange          = class;
 
-  TOnMatchToken = procedure(Sender: TObject; Client: TecParserResults;
-      const Text: ecString; APos: integer; var MatchLen: integer) of object;
-  TOnBlockCheck = procedure(Sender: TObject; Client: TecClientSyntAnalyzer;
-      const Text: ecString; var RefIdx: integer; var Accept: Boolean) of object;
-
-  TBoundDefEvent = procedure(Sender: TecClientSyntAnalyzer; Range: TecTextRange; var sIdx, eIdx: integer) of object;
+  TecMatchTokenEvent = procedure(Sender: TObject; AClient: TecParserResults;
+    const AText: ecString; APos: integer; var AMatchLen: integer) of object;
+  TecBlockCheckEvent = procedure(Sender: TObject; AClient: TecClientSyntAnalyzer;
+    const AText: ecString; var ARefIndex: integer; var Accept: Boolean) of object;
+  TecBoundDefEvent = procedure(Sender: TecClientSyntAnalyzer; ARange: TecTextRange;
+    var AIndexStart, AIndexEnd: integer) of object;
 
   TecParseInThreadResult = (
     eprNormal,
@@ -240,7 +231,7 @@ type
     FHighlightPos: TecHighlightPos;
     FDynSelectMin: Boolean;
     FCancelNextRules: Boolean;
-    FOnBlockCheck: TOnBlockCheck;
+    FOnBlockCheck: TecBlockCheckEvent;
     FDrawStaple: Boolean;
     FGroupIndex: integer;
     FCollapseFmt: ecString;
@@ -312,6 +303,7 @@ type
     property TreeItemStyleObj: TecSyntaxFormat read FTreeItemStyleObj;
     property TreeGroupStyleObj: TecSyntaxFormat read FTreeGroupStyleObj;
     procedure Loaded; override;
+    property OnBlockCheck: TecBlockCheckEvent read FOnBlockCheck write FOnBlockCheck;
   published
     property BlockType: TecTagBlockType read FBlockType write SetBlockType default btRangeStart;
     property ConditionList: TecConditionCollection read FConditions write SetConditions;
@@ -335,7 +327,6 @@ type
     property DrawStaple: Boolean read FDrawStaple write SetDrawStaple default False;
     property GroupIndex: integer read FGroupIndex write FGroupIndex default 0;
     property CollapseFmt: ecString read FCollapseFmt write SetCollapseFmt;
-    property OnBlockCheck: TOnBlockCheck read FOnBlockCheck write FOnBlockCheck;
     property SelfClose: Boolean read FSelfClose write SetSelfClose default False;
     // New in v2.20
     property NoEndRule: Boolean read FNoEndRule write SetNoEndRule default False;
@@ -368,7 +359,7 @@ type
   private
     FRegExpr: TecRegExpr;
     FTokenType: integer;
-    FOnMatchToken: TOnMatchToken;
+    FOnMatchToken: TecMatchTokenEvent;
     FColumnTo: integer;
     FColumnFrom: integer;
     FCriSec: TCriticalSection;
@@ -385,12 +376,12 @@ type
     constructor Create(Collection: TCollection); override;
     destructor Destroy; override;
     function Match(const Source: ecString; Pos: integer): integer;
+    property OnMatchToken: TecMatchTokenEvent read FOnMatchToken write FOnMatchToken;
   published
     property TokenType: integer read FTokenType write SetTokenType default 0;
     property Expression: ecString read GetExpression write SetExpression;
     property ColumnFrom: integer read FColumnFrom write SetColumnFrom;
     property ColumnTo: integer read FColumnTo write SetColumnTo;
-    property OnMatchToken: TOnMatchToken read FOnMatchToken write FOnMatchToken;
   end;
 
   TecTokenRuleCollection = class(TSyntCollection)
@@ -504,7 +495,6 @@ type
   TecParserResults = class(TTokenHolder)
   private
     FBuffer: TATStringBuffer;
-    FClient: IecSyntClient;
     FOwner: TecSyntAnalyzer;
     FFinished: Boolean;
     FPrevChangeLine: integer;
@@ -519,7 +509,6 @@ type
     function ExtractTag(var FPos: integer; ADisableFolding: Boolean): Boolean;
     function GetTags(Index: integer): PecSyntToken;
     function GetSubLexerRangeCount: integer;
-    function GetSubLexerRange(Index: integer): TecSubLexerRange;
     function BufferInvalidated: Boolean; inline;
 
     //moved to 'private' by Alexey, not needed in CudaText
@@ -527,7 +516,6 @@ type
     property Tags[Index: integer]: PecSyntToken read GetTags; default;
     property TagStr[Index: integer]: ecString read GetTokenStr;
     property SubLexerRangeCount: integer read GetSubLexerRangeCount;
-    property SubLexerRanges[Index: integer]: TecSubLexerRange read GetSubLexerRange;
 
   protected
     function GetTokenCount: integer; override;
@@ -555,7 +543,7 @@ type
     //holds booleans: first token of i-th line is a 'comment'
     CmtIndexer: packed array of boolean; //Alexey
 
-    constructor Create(AOwner: TecSyntAnalyzer; ABuffer: TATStringBuffer; const AClient: IecSyntClient);
+    constructor Create(AOwner: TecSyntAnalyzer; ABuffer: TATStringBuffer);
     destructor Destroy; override;
 
     procedure Clear; virtual;
@@ -623,7 +611,7 @@ type
 
         if FlagStop then
           Break
-      until false
+      until False
 
       FlushData(PublicData)
       CriSec.Enter
@@ -632,7 +620,7 @@ type
     finally
       EventParseIdle.SetEvent
     end
-  until false
+  until False
   *)
 
   { TecClientSyntAnalyzer }
@@ -648,10 +636,8 @@ type
     FOnProgressFirst: TNotifyEvent;
     FOnProgressSecond: TNotifyEvent;
     FOnProgressBoth: TNotifyEvent;
-    {$ifdef ParseProgress}
-    FProgress: integer;
-    {$endif}
 
+    procedure UpdateFirstLineOfChange(var ALine: integer);
     function CheckBracketsAreClosed(ATokenIndexFrom, ATokenIndexTo: integer): boolean; //Alexey
     procedure ClearDataOnChange;
     procedure ClearSublexerRangesFromLine(ALine: integer);
@@ -708,7 +694,6 @@ type
     procedure ParseAll(AResetContent: Boolean);
     procedure ParseToPos(APos: integer);
     function ParseInThread: TecParseInThreadResult;
-    procedure DoShowProgress;
     //procedure CompleteAnalysis;
 
     function CloseRange(Cond: TecTagBlockCondition; RefTag: integer): Boolean;
@@ -723,55 +708,29 @@ type
     procedure CopyRangesFold(L: TSortedList);
   end;
 
-// *******************************************************************
-//  Syntax analizer
-//            container of syntax rules
-// *******************************************************************
-
   { TLoadableComponent }
 
   TLoadableComponent = class(TComponent)
-  private type
-    TThemeMappingItem = record
-      StrFrom, StrTo: string;
-    end;
   private
     FSkipNewName: Boolean;
     FFileName: string;
-    FIgnoreAll: Boolean;
+    FIgnoreReadErrors: Boolean;
     FSaving: Boolean;
-    procedure LoadExtraData(const AFileName: string);
+    FCheckExistingName: Boolean;
   protected
-    procedure OnReadError(Reader: TReader; const Message: string;
-                          var Handled: Boolean); virtual;
-    function NotStored: Boolean;
-  private
-    ThemeMappingCount: integer;
-    ThemeMappingArray: array[0..40] of TThemeMappingItem;
-    SubLexerNames: array[0..12] of string;
+    procedure OnReadError(Reader: TReader; const Message: string; var Handled: Boolean); virtual;
   public
-    CommentRangeBegin: string;
-    CommentRangeEnd: string;
-    CommentFullLinesBegin: string;
-    CommentFullLinesEnd: string;
-    StylesOfComments: string;
-    StylesOfStrings: string;
-    function SubLexerName(Index: integer): string;
-    function ThemeMappingOfStyle(const AName: string): string;
-  public
-    procedure SaveToFile(const FileName: string); virtual;
+    procedure SaveToFile(const AFileName: string); virtual;
     procedure SaveToStream(Stream: TStream); virtual;
     procedure LoadFromFile(const AFileName: string); virtual;
-    procedure LoadFromResourceID(Instance: Cardinal; ResID: Integer; ResType: string); virtual;
-    procedure LoadFromResourceName(Instance: Cardinal; const ResName: string; ResType: string); virtual;
     procedure LoadFromStream(const Stream: TStream); virtual;
   protected
     procedure SetName(const NewName: TComponentName); override;
     property FileName: string read FFileName;
   end;
 
-  TParseTokenEvent = procedure(Client: TecParserResults; const Text: ecString; Pos: integer;
-      var TokenLength: integer; var Rule: TecTokenRule) of object;
+  TecParseTokenEvent = procedure(AClient: TecParserResults; const AText: ecString; APos: integer;
+    var ATokenLength: integer; var ARule: TecTokenRule) of object;
 
   TecParseProgressEvent = procedure(Sender: TObject; AProgress: integer) of object;
 
@@ -786,6 +745,10 @@ type
   { TecSyntAnalyzer }
 
   TecSyntAnalyzer = class(TLoadableComponent)
+  private type
+    TThemeMappingItem = record
+      StrFrom, StrTo: string;
+    end;
   private
     FDeleted: Boolean; //Alexey
     FClientList: TFPList;
@@ -828,12 +791,17 @@ type
     FCharset: TFontCharSet;
     FSeparateBlocks: TecSeparateBlocksMode;
     FAlwaysSyncBlockAnal: Boolean;   // Indicates that blocks analysis may after tokens
-    FOnGetCollapseRange: TBoundDefEvent;
-    FOnCloseTextRange: TBoundDefEvent;
+    FOnGetCollapseRange: TecBoundDefEvent;
+    FOnCloseTextRange: TecBoundDefEvent;
     FIdleAppendDelayInit: Cardinal;
     FIdleAppendDelay: Cardinal;
-    FOnParseToken: TParseTokenEvent;
+    FOnParseToken: TecParseTokenEvent;
 
+    ThemeMappingCount: integer;
+    ThemeMappingArray: array[0..40] of TThemeMappingItem;
+    SubLexerNames: array[0..12] of string;
+
+    procedure LoadExtraData(const AFileName: string);
     procedure InitCommentRules;
     procedure SetSampleText(const Value: TStrings);
     procedure FormatsChanged(Sender: TCollection; Item: TSyntCollectionItem);
@@ -877,6 +845,7 @@ type
     function GetSeparateBlocks: Boolean;
     procedure UpdateSpecialKinds; //Alexey
   protected
+    procedure LoadFromFile(const AFileName: string); override;
     function GetToken(Client: TecParserResults; const Source: ecString;
                        APos: integer; OnlyGlobal: Boolean): TecSyntToken; virtual;
     procedure HighlightKeywords(Client: TecParserResults; const Source: ecString;
@@ -895,12 +864,21 @@ type
     IndentBasedFolding: boolean; //Alexey
     AppliedSyntaxTheme: string; //Alexey
 
+    CommentRangeBegin: string;
+    CommentRangeEnd: string;
+    CommentFullLinesBegin: string;
+    CommentFullLinesEnd: string;
+    StylesOfComments: string;
+    StylesOfStrings: string;
+
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure Assign(Source: TPersistent); override;
     //function AddClient(const Client: IecSyntClient; ABuffer: TATStringBuffer): TecClientSyntAnalyzer;
     procedure ClearClientContents;
     procedure UpdateClients;
+    function SubLexerName(Index: integer): string;
+    function ThemeMappingOfStyle(const AName: string): string;
 
     procedure AddMasterLexer(SyntAnal: TecSyntAnalyzer);
     procedure RemoveMasterLexer(SyntAnal: TecSyntAnalyzer);
@@ -915,6 +893,12 @@ type
     property DefStyle: TecSyntaxFormat read FDefStyle write SetDefStyle;
     property CollapseStyle: TecSyntaxFormat read FCollapseStyle write SetCollapseStyle;
     }
+
+    property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    property OnGetCollapseRange: TecBoundDefEvent read FOnGetCollapseRange write FOnGetCollapseRange;
+    property OnCloseTextRange: TecBoundDefEvent read FOnCloseTextRange write FOnCloseTextRange;
+    property OnParseToken: TecParseTokenEvent read FOnParseToken write FOnParseToken;
+
   published
     property Formats: TecStylesCollection read FFormats write SetFormats;
     property TokenRules: TecTokenRuleCollection read FTokenRules write SetTokenRules;
@@ -953,11 +937,6 @@ type
     property AlwaysSyncBlockAnal: Boolean read FAlwaysSyncBlockAnal write SetAlwaysSyncBlockAnal default False;
     property IdleAppendDelay: Cardinal read FIdleAppendDelay write FIdleAppendDelay default 200;
     property IdleAppendDelayInit: Cardinal read FIdleAppendDelayInit write FIdleAppendDelayInit default 50;
-
-    property OnChange: TNotifyEvent read FOnChange write FOnChange;
-    property OnGetCollapseRange: TBoundDefEvent read FOnGetCollapseRange write FOnGetCollapseRange;
-    property OnCloseTextRange: TBoundDefEvent read FOnCloseTextRange write FOnCloseTextRange;
-    property OnParseToken: TParseTokenEvent read FOnParseToken write FOnParseToken;
   end;
 
   TLibSyntAnalyzer = class(TecSyntAnalyzer)
@@ -976,18 +955,13 @@ type
 
   TecSyntaxManager = class(TLoadableComponent)
   private
-    FOnChange: TNotifyEvent;
     FList: TFPList;
-    FCurrentLexer: TecSyntAnalyzer;
-    FOnLexerChanged: TNotifyEvent;
     FModified: Boolean;
     function GeItem(Index: integer): TecSyntAnalyzer;
     function GetCount: integer;
-    procedure SetCurrentLexer(const Value: TecSyntAnalyzer);
   protected
     procedure GetChildren(Proc: TGetChildProc; Root: TComponent); override;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
-    procedure Changed; dynamic;
     procedure OnReadError(Reader: TReader; const Message: string;
                           var Handled: Boolean); override;
   public
@@ -998,18 +972,13 @@ type
     function FindAnalyzer(const LexerName: string): TecSyntAnalyzer;
     function AddAnalyzer: TecSyntAnalyzer;
     procedure Clear;
-    procedure Move(CurIndex, NewIndex: Integer);
-
     property AnalyzerCount: integer read GetCount;
     property Analyzers[Index: integer]: TecSyntAnalyzer read GeItem;
     property FileName;
-    property CurrentLexer: TecSyntAnalyzer read FCurrentLexer write SetCurrentLexer;
     property Modified: Boolean read FModified write FModified;
-  published
-    property OnLexerChanged: TNotifyEvent read FOnLexerChanged write FOnLexerChanged stored NotStored;
-    property OnChange: TNotifyEvent read FOnChange write FOnChange stored NotStored;
   end;
 
+  (*
   TecSyntStyles = class(TLoadableComponent)
   private
     FStyles: TecStylesCollection;
@@ -1020,7 +989,7 @@ type
   published
     property Styles: TecStylesCollection read FStyles write SetStyles;
   end;
-
+  *)
 
 var
   EControlOptions: record
@@ -1055,6 +1024,23 @@ const
                              'String'  + #10 +
                              'Number';
 }
+
+procedure _GetIniValue(const SItem: string; out SKey, SValue: string); inline;
+var
+  N: integer;
+begin
+  N := Pos('=', SItem);
+  if N=0 then
+  begin
+    SKey := '';
+    SValue := '';
+  end
+  else
+  begin
+    SKey := Copy(SItem, 1, N-1);
+    SValue := Copy(SItem, N+1, MaxInt);
+  end;
+end;
 
 function _IndentOfBuffer(S: PWideChar; Len: integer): Integer; inline; // Alexey
 var
@@ -1124,6 +1110,7 @@ begin
   {$endif}
 
   AssignFile(f, fn);
+  {$Push}
   {$I-}
   Append(f);
   if IOResult<>0 then
@@ -1133,16 +1120,13 @@ begin
   Writeln(f, 'Exception: '+E.ClassName+', message: '+E.Message);
   DumpExceptionBacktrace(f);
   Close(f);
+  {$Pop}
 end;
 
 procedure TecParserThread.Execute;
 var
   Res: TecParseInThreadResult;
   SavedChangeLine: integer;
-{$ifdef ParseTime}
-var
-  tick: QWord;
-{$endif}
 begin
   try
     repeat
@@ -1160,14 +1144,7 @@ begin
 
       An.EventParseIdle.ResetEvent;
       try
-        {$ifdef ParseTime}
-        DebugMsg := 'parse-begin';
-        DebugTicks := 0;
-        Synchronize(ShowDebugMsg);
-        tick := GetTickCount64;
-        {$else}
         //Synchronize(DummyProc); //otherwise editor is not highlighted
-        {$endif}
 
         //this repeat/until is needed to avoid having broken PublicData, when eprInterrupted occurs
         SavedChangeLine := An.FPrevChangeLine;
@@ -1180,11 +1157,6 @@ begin
       finally
         if not Terminated and not Application.Terminated then
         begin
-          {$ifdef ParseTime}
-          DebugMsg := 'parse-done';
-          DebugTicks := GetTickCount64-tick;
-          Synchronize(ShowDebugMsg);
-          {$endif}
           Synchronize(ThreadParseDone);
         end;
 
@@ -1218,7 +1190,7 @@ end;
 
 class operator TecSubLexerRange.=(const a, b: TecSubLexerRange): boolean;
 begin
-  Result := false;
+  Result := False;
 end;
 
 { TecSyntToken }
@@ -1256,7 +1228,7 @@ end;
 
 class operator TecSyntToken.=(const A, B: TecSyntToken): boolean;
 begin
-  Result := false;
+  Result := False;
 end;
 
 function TecSyntToken.Style: TecSyntaxFormat;
@@ -1376,8 +1348,17 @@ begin
        end;
      end else
      begin
+       {$ifdef EC_CUSTOM_STR_FIND}
+       // gives almost no speedup, max 1-5%
+       Result := StringList_FindWideBuffer(
+         TStringList(FTagList),
+         @Source[Token.Range.StartPos + 1],
+         Token.Range.EndPos - Token.Range.StartPos,
+         N);
+       {$else}
        SToken := Token.GetStr(Source, True);
        Result := (FTagList as TStringList).Find(SToken, N);
+       {$endif}
        if FCondType = tcNotEqual then
          Result := not Result;
      end;
@@ -1390,9 +1371,9 @@ begin
   FCondType := tcEqual;
   FTagList := TStringList.Create;
   {$if FPC_FULLVERSION>=30200}
-  TStringList(FTagList).UseLocale := false; //Alexey, makes Find() faster by 30%
+  TStringList(FTagList).UseLocale := False; //Alexey, makes Find() faster by 30%
   {$endif}
-  TStringList(FTagList).Sorted := true;
+  TStringList(FTagList).Sorted := True;
   TStringList(FTagList).Delimiter := ' ';
   TStringList(FTagList).Duplicates := dupIgnore;
   TStringList(FTagList).CaseSensitive := True;
@@ -2282,16 +2263,13 @@ end;
 
 { TecParserResults }
 
-constructor TecParserResults.Create(AOwner: TecSyntAnalyzer;
-  ABuffer: TATStringBuffer; const AClient: IecSyntClient);
-//TODO: del AUseTimer
+constructor TecParserResults.Create(AOwner: TecSyntAnalyzer; ABuffer: TATStringBuffer);
 begin
   inherited Create;
   if ABuffer = nil then
     raise Exception.Create('TextBuffer not passed to parser');
   FOwner := AOwner;
   FBuffer := ABuffer;
-  FClient := AClient;
   FTagList := TecTokenList.Create(False);
   FSubLexerBlocks := TecSubLexerRanges.Create;
   FOwner.FClientList.Add(Self);
@@ -2315,8 +2293,8 @@ begin
   FSubLexerBlocks.Clear;
   FStateChanges.Clear;
   FCurState := 0;
-  SetLength(TokenIndexer, 0);
-  SetLength(CmtIndexer, 0);
+  TokenIndexer := nil;
+  CmtIndexer := nil;
   FPrevChangeLine := -1;
 end;
 
@@ -2441,7 +2419,7 @@ begin
   SkipQuotes(Ptr2, Len2);
 
   if Len1 <> Len2 then
-    Exit(false);
+    Exit(False);
 
   // case-insensitive, like in original EControl compare
   // (used for HTML/XML lexer mostly)
@@ -2458,7 +2436,7 @@ begin
   St := T.Range.StartPos;
   Len := T.Range.EndPos - St;
   if Len <> Length(Str) then
-    Exit(false);
+    Exit(False);
   // case-sensitive
   Result := strlcomp(
     PWideChar(Str),
@@ -2493,7 +2471,7 @@ begin
   for i := NLastLine + 1 to High(TokenIndexer) do
   begin
     TokenIndexer[i] := -1;
-    CmtIndexer[i] := false;
+    CmtIndexer[i] := False;
   end;
 end;
 
@@ -2514,7 +2492,7 @@ begin
     for i := NPrevLen to NNewLen - 1 do
     begin
       TokenIndexer[i] := -1;
-      CmtIndexer[i] := false;
+      CmtIndexer[i] := False;
     end;
   end;
 
@@ -2606,7 +2584,7 @@ begin
     //allow max 1 token per line! 0 is for multi-line comments
     if (NTokenIndex1>=0) and (NTokenIndex2>=0) then
       if NTokenIndex2-NTokenIndex1 > 1 then Break;
-  until false;
+  until False;
 
   //move down to 1st non-empty
   while (TokenIndexer[NLineFrom]<0) and (NLineFrom<ALineTo) do
@@ -2966,17 +2944,22 @@ end;
 
 function TecParserResults.AnalyzerAtPos(APos: integer; ABlocks: TecSubLexerRanges): TecSyntAnalyzer;
 var
+  Sub: PecSubLexerRange;
   N: integer;
-  Rng: TecSubLexerRange;
 begin
   Result := FOwner;
   if APos < 0 then Exit;
   N := ABlocks.PriorAt(APos);
   if N < 0 then Exit;
-  Rng := ABlocks.Items[N];
-  if (Rng.Range.StartPos<=APos) and
-     ((Rng.Range.EndPos<0){Rng is not closed} or (APos<Rng.Range.EndPos)) then
-    Result := Rng.Rule.SyntAnalyzer;
+  Sub := ABlocks.InternalGet(N);
+  if (Sub.Range.StartPos <= APos) and
+     ((Sub.Range.EndPos < 0){Sub is not closed} or (APos <= Sub.Range.EndPos)) then //'<=' to fix CudaText #3933
+  begin
+    Result := Sub.FinalSubAnalyzer;
+    if Result = nil then
+      Result := Sub.Rule.SyntAnalyzer;
+  end;
+
  {
  for i := 0 to ABlocks.Count - 1 do
   with ABlocks[i] do
@@ -2989,11 +2972,6 @@ end;
 function TecParserResults.GetSubLexerRangeCount: integer;
 begin
   Result := FSubLexerBlocks.Count;
-end;
-
-function TecParserResults.GetSubLexerRange(Index: integer): TecSubLexerRange;
-begin
-  Result := FSubLexerBlocks[Index];
 end;
 
 function TecParserResults.GetTokenType(Index: integer): integer;
@@ -3053,7 +3031,7 @@ end;
 
 constructor TecClientSyntAnalyzer.Create(AOwner: TecSyntAnalyzer; ABuffer: TATStringBuffer);
 begin
-  inherited Create(AOwner, ABuffer, nil);
+  inherited Create(AOwner, ABuffer);
 
   FRanges := TSortedList.Create(True);
   FOpenedBlocks := TSortedList.Create(False);
@@ -3114,8 +3092,8 @@ begin
   FTagList.Clear;
   FRanges.Clear;
   FOpenedBlocks.Clear;
-  SetLength(TokenIndexer, 0);
-  SetLength(CmtIndexer, 0);
+  TokenIndexer := nil;
+  CmtIndexer := nil;
 
   FFinished := False;
   FLastAnalPos := 0;
@@ -3231,10 +3209,12 @@ begin
 end;
 
 function TecClientSyntAnalyzer.Finished: Boolean;
-var i: integer;
-  Sub: TecSubLexerRange;
+var
+  Sub: PecSubLexerRange;
+  i: integer;
 begin
-  //ShowTokenIndexer; //debugging only!
+  ////Debugging only!
+  //ShowTokenIndexer;
   //ShowCmtIndexer;
 
   Result := True;
@@ -3244,7 +3224,7 @@ begin
   // Close SubLexers at the End of Text
   for i := FSubLexerBlocks.Count - 1 downto 0 do
   begin
-    Sub := FSubLexerBlocks[i];
+    Sub := FSubLexerBlocks.InternalGet(i);
     if (Sub.Range.EndPos = -1) and Sub.Rule.ToTextEnd then
      begin
        Sub.Range.EndPos := FBuffer.TextLength{ - 1};
@@ -3252,7 +3232,7 @@ begin
                       FBuffer.LineLength(FBuffer.Count-1),
                       FBuffer.Count-1); //at end
        Sub.CondEndPos := Sub.Range.EndPos;
-       FSubLexerBlocks[i] := Sub;
+       //FSubLexerBlocks[i] := Sub; //makes sense if we get record, not pointer to record
      end;
   end;
 
@@ -3392,11 +3372,6 @@ end;
 
 function TecClientSyntAnalyzer.ParseInThread: TecParseInThreadResult; //Alexey
 var
-  {$ifdef ParseProgress}
-  BufLen: integer;
-  ProgressPrev: integer;
-  NMaxPercents: integer;
-  {$endif}
   own: TecSyntAnalyzer;
   bSeparateBlocks: boolean;
   bDisableFolding: boolean;
@@ -3415,15 +3390,6 @@ begin
 
   NPos := 0;
   bSeparateBlocks := FOwner.SeparateBlockAnalysis;
-
-  {$ifdef ParseProgress}
-  BufLen := FBuffer.TextLength;
-  if bSeparateBlocks then
-    NMaxPercents := 50
-  else
-    NMaxPercents := 100;
-  ProgressPrev := 0;
-  {$endif}
 
   bDisableFolding := GetDisabledFolding;
   if bDisableFolding then
@@ -3454,9 +3420,6 @@ begin
       //all tokens found, now find blocks (if bSeparateBlocks)
       if bSeparateBlocks then
       begin
-        {$ifdef ParseProgress}
-        ProgressPrev := 50;
-        {$endif}
         NTagCount := TagCount;
 
         for iToken := FStartSepRangeAnal + 1 to NTagCount do
@@ -3471,19 +3434,6 @@ begin
 
           if BufferInvalidated then
             Exit(eprBufferInvalidated);
-
-          {$ifdef ParseProgress}
-          if iToken mod ProcessMsgStep2 = 0 then
-          begin
-            //progress for 2nd half of parsing, range 50..100
-            FProgress := 50 + iToken * 50 div NTagCount;
-            if FProgress <> ProgressPrev then
-            begin
-              ProgressPrev := FProgress;
-              DoShowProgress;
-            end;
-          end;
-          {$endif}
         end;
       end;
 
@@ -3496,34 +3446,8 @@ begin
       //this works when parsing has reached the ed's LineBottom,
       //it updates not-complete PublicData
       UpdatePublicData(False);
-
-      {$ifdef ParseProgress}
-      if TagCount mod ProcessMsgStep1 = 0 then
-      begin
-        //if bSeparateBlocks, it's progress for 1st half of parsing, 0..50
-        //otherwise, it's progress for entire parsing, 0..100
-        if BufLen > 0 then
-          if FPos < ProgressMinPos then
-            FProgress := 0
-          else
-            FProgress := NPos * NMaxPercents div BufLen;
-        if FProgress <> ProgressPrev then
-        begin
-          ProgressPrev := FProgress;
-          DoShowProgress;
-        end;
-      end;
-      {$endif}
     end;
   until False;
-end;
-
-procedure TecClientSyntAnalyzer.DoShowProgress;
-begin
-  {$ifdef ParseProgress}
-  if Assigned(OnLexerParseProgress) then
-    OnLexerParseProgress(Owner, FProgress);
-  {$endif}
 end;
 
 procedure TecClientSyntAnalyzer.ParseToPos(APos: integer);
@@ -3549,13 +3473,22 @@ end;
 
 procedure TecClientSyntAnalyzer.ClearSublexerRangesFromLine(ALine: integer);
 var
-  Sub: PecSubLexerRange;
-  Pnt: TPoint;
-  i: integer;
+  NIndex: integer;
 begin
+  if ALine = 0 then
+  begin
+    FSubLexerBlocks.Clear;
+    Exit
+  end;
+
+  NIndex := FSubLexerBlocks.FindFirstAtOrAfterLine(ALine);
+  if NIndex >= 0 then
+    FSubLexerBlocks.ClearFromIndex(NIndex);
+
+  (*
   for i := FSubLexerBlocks.Count - 1 downto 0 do
   begin
-    Sub := PecSubLexerRange(FSubLexerBlocks.InternalGet(i));
+    Sub := FSubLexerBlocks.InternalGet(i);
     if ALine <= Sub.Range.PointStart.Y then
     begin
       Pnt := Buffer.StrToCaret(Sub.CondStartPos);
@@ -3576,34 +3509,99 @@ begin
       end;
     end;
   end;
+  *)
+end;
+
+procedure TecClientSyntAnalyzer.UpdateFirstLineOfChange(var ALine: integer);
+var
+  Sub: PecSubLexerRange;
+  NSublexCount, N: integer;
+begin
+  if ALine = 0 then Exit;
+
+  //change in sublexer range? get position of that range start. CudaText issue #3882.
+  //to support command 'duplicate line' at the end of sublexer range, e.g. in Markdown lexer with fenced blocks.
+  NSublexCount := FSubLexerBlocks.Count;
+  if NSublexCount > 0 then
+  begin
+    N := FSubLexerBlocks.FindFirstContainingLine(ALine);
+    if N >= 0 then
+    begin
+      Sub := FSubLexerBlocks.InternalGet(N);
+
+      // delete sublexer range, decrease ALine
+      ALine := Sub.Range.PointStart.Y;
+      FSubLexerBlocks.ClearFromIndex(N);
+
+      {
+      // just mark sublexer range as opened
+      // it's bad: in Markdown fenced blocks, sublexer ranges are duplicated after editing
+      Sub.Range.EndPos := -1;
+      Sub.CondEndPos := -1;
+      }
+    end;
+  end;
 end;
 
 procedure TecClientSyntAnalyzer.ClearDataOnChange;
-var
-  NTagCount: integer;
  //
- procedure CleanRangeList(List: TSortedList; IsClosed: Boolean);
- var i: integer;
+ procedure CleanRangeList(List: TSortedList; IsClosed: Boolean; ATagCount: integer);
+ var
+   R: TecTextRange;
+   i: integer;
  begin
    for i := List.Count - 1 downto 0 do
-    with TecTextRange(List[i]) do
-     if (FCondIndex >= NTagCount) or (StartIdx >= NTagCount) or IsClosed and
-        ((FEndCondIndex >= NTagCount) or (EndIdx >= NTagCount)) then
-      List.Delete(i);
+   begin
+     R := TecTextRange(List[i]);
+     if (R.FCondIndex >= ATagCount) or (R.StartIdx >= ATagCount) or R.IsClosed and
+        ((R.FEndCondIndex >= ATagCount) or (R.EndIdx >= ATagCount)) then
+       List.Delete(i);
+   end;
+ end;
+ //
+ procedure UpdateFoldRangesOnChange(ATagCount: integer);
+ var
+   R: TecTextRange;
+   NDelta: integer;
+   i: integer;
+ begin
+   //delta>0 was added for Python: editing below the block end must enlarge that block to include the new text.
+   //but delta>0 breaks HTML lexer: on editing in any place,
+   //            text in <p>text text</p> changes styles to "misspelled tag property".
+   if Owner.IndentBasedFolding then
+     NDelta := 4
+   else
+     NDelta := 0;
+
+   for i := FRanges.Count - 1 downto 0 do
+   begin
+     R := TecTextRange(FRanges[i]);
+     if (R.FCondIndex >= ATagCount) or (R.StartIdx >= ATagCount) then
+       FRanges.Delete(i)
+     else
+     if (R.FEndCondIndex >= ATagCount - NDelta) or
+        (R.EndIdx >= ATagCount - NDelta) then
+     begin
+       //makes range opened: set ending to -1, add to FOpenedBlocks
+       R.EndIdx := -1;
+       R.FEndCondIndex := -1;
+       FOpenedBlocks.Add(R);
+     end;
+   end;
  end;
  //
 var
-  //lexer will update ranges, which have ending at changed-pos minus delta (in tokens)
-  NDeltaRanges: integer;
-  NLine, NTokenIndex, i: integer;
-  Range: TecTextRange;
+  NLine, NTokenIndex, NTagCount: integer;
 begin
   if FPrevChangeLine < 0 then Exit;
   NLine := FPrevChangeLine;
+  NTokenIndex := -1;
 
   if NLine > 0 then
   begin
-    NTokenIndex:= FTagList.PriorAtLine(NLine);
+    UpdateFirstLineOfChange(NLine);
+
+    NTokenIndex := FTagList.PriorAtLine(NLine);
     if NTokenIndex <= 0 then
       NLine := 0;
   end;
@@ -3623,14 +3621,6 @@ begin
     Exit
   end;
 
-  // delta>0 was added for Python: editing below block end must enlarge previous block to editing pos
-  // delta>0 breaks HTML lexer: on editing in any place,
-  // text in <p>text text</p> changes styles to "misspelled tag property"
-  if Owner.IndentBasedFolding then
-    NDeltaRanges := 4
-  else
-    NDeltaRanges := 0;
-
   ClearSublexerRangesFromLine(NLine);
   FTagList.ClearFromIndex(NTokenIndex);
   ClearTokenIndexer;
@@ -3640,7 +3630,7 @@ begin
   FStartSepRangeAnal := NTagCount;
 
   // Remove text ranges from service containers
-  CleanRangeList(FOpenedBlocks, False);
+  CleanRangeList(FOpenedBlocks, False, NTagCount);
 
   //Alexey: prevent almost hang when user fastly pastes blocks in big file,
   //which gives e.g. 400..800..3000 opened blocks
@@ -3648,20 +3638,7 @@ begin
     FOpenedBlocks.Clear;
 
   // Remove text ranges from main storage
-  for i := FRanges.Count - 1 downto 0 do
-  begin
-    Range := TecTextRange(FRanges[i]);
-    if (Range.FCondIndex >= NTagCount) or (Range.StartIdx >= NTagCount) then
-      FRanges.Delete(i)
-    else
-    if (Range.FEndCondIndex >= NTagCount - NDeltaRanges) or
-       (Range.EndIdx >= NTagCount - NDeltaRanges) then // Alexey: delta
-    begin
-      Range.EndIdx := -1;
-      Range.FEndCondIndex := -1;
-      FOpenedBlocks.Add(Range);
-    end;
-  end;
+  UpdateFoldRangesOnChange(NTagCount);
 
   // Restore parser state
   RestoreState;
@@ -3911,7 +3888,7 @@ var
     ch: ecChar;
   begin
     N := 0;
-    Result := false;
+    Result := False;
     while (j + N) <= length( FmtStrNumber ) do
     begin
       ch := FmtStrNumber[j + N];
@@ -3922,7 +3899,7 @@ var
     if  N > 0  then  begin
       NumValue := StrToIntDef( copy( FmtStrNumber, j, N ), 0 );
       inc( j, N );
-      Result := true;
+      Result := True;
     end;
   end;
 
@@ -4251,6 +4228,117 @@ begin
   end;
 end;
 
+{ TecSyntAnalyzer }
+
+procedure TecSyntAnalyzer.LoadExtraData(const AFileName: string);
+const
+  //Utf8Bom = #$EF#$BB#$BF;
+  sign1 = #$EF;
+  sign2 = #$BB;
+  sign3 = #$BF;
+var
+  F: TextFile;
+  SItem, SKey, SValue: string;
+  Section: (secNone, secComments, secMap, secRef);
+  N: integer;
+begin
+  {$Push}
+  {$IOChecks off}
+  AssignFile(F, AFileName);
+  Reset(F);
+  if IOResult<>0 then exit;
+  {$Pop}
+  Section:= secNone;
+  while not EOF(F) do
+    begin
+      Readln(F, SItem);
+      if SItem='' then Continue;
+      if SItem[1]=';' then Continue;
+
+      //FreePascal writes BOM to ini files
+      if (Length(SItem)>3) and
+         (SItem[1]=sign1) and
+         (SItem[2]=sign2) and
+         (SItem[3]=sign3) then
+        Delete(SItem, 1, 3);
+
+      if SItem='[comments]' then
+      begin
+        Section := secComments;
+        Continue;
+      end;
+      if SItem='[map]' then
+      begin
+        Section := secMap;
+        Continue;
+      end;
+      if SItem='[ref]' then
+      begin
+        Section := secRef;
+        Continue;
+      end;
+      if SItem[1]='[' then
+      begin
+        Section := secNone;
+        Continue;
+      end;
+
+      _GetIniValue(SItem, SKey, SValue);
+      case Section of
+        secComments:
+          begin
+            if SKey='str1' then CommentRangeBegin := SValue else
+            if SKey='str2' then CommentRangeEnd := SValue else
+            if SKey='full1' then CommentFullLinesBegin := SValue else
+            if SKey='full2' then CommentFullLinesEnd := SValue else
+            if SKey='styles_cmt' then StylesOfComments := SValue else
+            if SKey='styles_str' then StylesOfStrings := SValue;
+          end;
+        secMap:
+          begin
+            if ThemeMappingCount<High(ThemeMappingArray) then
+            begin
+              Inc(ThemeMappingCount);
+              ThemeMappingArray[ThemeMappingCount-1].StrFrom := SKey;
+              ThemeMappingArray[ThemeMappingCount-1].StrTo := SValue;
+            end;
+          end;
+        secRef:
+          begin
+            N := StrToIntDef(SKey, -1);
+            if (N>=0) and (N<=High(SubLexerNames)) then
+             SubLexerNames[N] := SValue;
+          end;
+        secNone:
+          begin
+          end;
+      end;
+    end;
+  CloseFile(F);
+end;
+
+function TecSyntAnalyzer.SubLexerName(Index: integer): string;
+begin
+  if (Index>=0) and (Index<=High(SubLexerNames)) then
+    Result := SubLexerNames[Index]
+  else
+    Result := '';
+end;
+
+function TecSyntAnalyzer.ThemeMappingOfStyle(const AName: string): string;
+var
+  ItemPtr: ^TThemeMappingItem;
+  i: integer;
+begin
+  for i := 0 to ThemeMappingCount-1 do
+  begin
+    ItemPtr := @ThemeMappingArray[i];
+    if AName = ItemPtr^.StrFrom then
+      Exit(ItemPtr^.StrTo);
+  end;
+  Result := '';
+end;
+
 procedure TecSyntAnalyzer.InitCommentRules;
 begin
   //fixes AV in BlockRules.OnChange, on loading Python file, with thread-parser
@@ -4258,17 +4346,17 @@ begin
 
   CommentRule1 := BlockRules.Add;
   CommentRule1.DisplayName := 'auto_cmt_1';
-  CommentRule1.Enabled := false;
+  CommentRule1.Enabled := False;
   CommentRule1.BlockType := btRangeStart;
-  CommentRule1.DisplayInTree := false;
-  CommentRule1.NoEndRule := false;
+  CommentRule1.DisplayInTree := False;
+  CommentRule1.NoEndRule := False;
   CommentRule1.CollapseFmt:= '// ...';
 
   CommentRule2 := BlockRules.Add;
   CommentRule2.DisplayName := 'auto_cmt_2';
-  CommentRule2.Enabled := false;
+  CommentRule2.Enabled := False;
   CommentRule2.BlockType := btRangeEnd;
-  CommentRule2.DisplayInTree := false;
+  CommentRule2.DisplayInTree := False;
 
   CommentRule1.BlockEndCond:= CommentRule2;
 end;
@@ -4293,6 +4381,40 @@ begin
       if b then
         IndentBasedFolding := True;
     end;
+  end;
+end;
+
+procedure TecSyntAnalyzer.LoadFromFile(const AFileName: string); //Alexey
+var
+  Stream: TFileStream;
+  Fmt: TecSyntaxFormat;
+  i: integer;
+begin
+  FFileName := AFileName;
+  Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyWrite);
+  try
+    LoadFromStream(Stream);
+    LoadExtraData(ChangeFileExt(AFileName, '.cuda-lexmap'));
+  finally
+    FreeAndNil(Stream);
+  end;
+
+  {
+  ShowMessage(ExtractFileName(AFileName)+#10+
+    CommentRangeBegin+' '+CommentRangeEnd+#10+
+    StylesOfComments+#10+
+    StylesOfStrings
+    );
+  }
+
+  for i := 0 to FFormats.Count-1 do
+  begin
+    Fmt := FFormats[i];
+    if Pos(','+Fmt.DisplayName+',', ','+StylesOfComments+',')>0 then
+      Fmt.TokenKind := etkComment
+    else
+    if Pos(','+Fmt.DisplayName+',', ','+StylesOfStrings+',')>0 then
+      Fmt.TokenKind := etkString;
   end;
 end;
 
@@ -4833,10 +4955,12 @@ begin
   if FCoping then Exit;
   FCoping := True;
   try
+    { //Alexey: removed
     for i := 0 to FClientList.Count - 1 do
      with TecClientSyntAnalyzer(FClientList[i]) do
        if FClient <> nil then
          FClient.FormatChanged;
+    }
     for i := 0 to FMasters.Count - 1 do
       TecSyntAnalyzer(FMasters[i]).UpdateClients;
   finally
@@ -4868,8 +4992,7 @@ begin
   for i := 0 to FMasters.Count - 1 do
     TecSyntAnalyzer(FMasters[i]).DetectBlockSeparate;
 
-  //Alexey
-  SetLength(FBlockRules_Detecters, 0);
+  FBlockRules_Detecters := nil;
   for i := 0 to FBlockRules.Count - 1 do
   begin
     Rule := FBlockRules[i];
@@ -4882,10 +5005,8 @@ begin
       end;
   end;
 
-  //Alexey
   UpdateSpecialKinds;
 
-  //Alexey
   if EControlOptions.AutoFoldComments > 1 then
     InitCommentRules;
 end;
@@ -5245,7 +5366,7 @@ begin
   inherited;
   FName:= '';
   FDescription:= '';
-  FAdvanced:= false;
+  FAdvanced:= False;
   FCode:= TStringList.Create;
 end;
 
@@ -5295,7 +5416,6 @@ begin
     TObject(FList[0]).Free;
   end;
 
-  Changed;
   FModified := True;
 end;
 
@@ -5308,15 +5428,9 @@ end;
 
 destructor TecSyntaxManager.Destroy;
 begin
-  FOnChange := nil;
   Clear;
   FreeAndNil(FList);
   inherited;
-end;
-
-procedure TecSyntaxManager.Changed;
-begin
-  if Assigned(FOnChange) then FOnChange(Self);
 end;
 
 function TecSyntaxManager.GeItem(Index: integer): TecSyntAnalyzer;
@@ -5342,7 +5456,6 @@ procedure TecSyntaxManager.LoadFromFile(const FileName: string);
 begin
   Clear;
   inherited;
-  Changed;
   FModified := False;
 end;
 
@@ -5352,18 +5465,13 @@ begin
   FModified := False;
 end;
 
-procedure TecSyntaxManager.Move(CurIndex, NewIndex: Integer);
-begin
-  FList.Move(CurIndex, NewIndex);
-  FModified := True;
-end;
-
 procedure TecSyntaxManager.Notification(AComponent: TComponent;
   Operation: TOperation);
 begin
   inherited;
 end;
 
+{
 procedure TecSyntaxManager.SetCurrentLexer(const Value: TecSyntAnalyzer);
 begin
   if (FCurrentLexer <> Value) and ((Value = nil) or (FList.IndexOf(value) <> -1)) then
@@ -5371,9 +5479,9 @@ begin
      FCurrentLexer := Value;
    end;
 end;
+}
 
-function TecSyntaxManager.FindAnalyzer(
-  const LexerName: string): TecSyntAnalyzer;
+function TecSyntaxManager.FindAnalyzer(const LexerName: string): TecSyntAnalyzer;
 var i: integer;
     An: TecSyntAnalyzer;
 begin
@@ -5381,10 +5489,7 @@ begin
   begin
    An := Analyzers[i];
    if SameText(An.LexerName, LexerName) then
-     begin
-      Result := An;
-      Exit;
-     end;
+      Exit(An);
   end;
   Result := nil;
 end;
@@ -5393,16 +5498,17 @@ procedure TecSyntaxManager.OnReadError(Reader: TReader;
   const Message: string; var Handled: Boolean);
 var S: string;
 begin
-  if not FIgnoreAll then
-   begin
+  if not FIgnoreReadErrors then
+  begin
     if AnalyzerCount > 0 then
       S := 'Error in lexer: '+Analyzers[AnalyzerCount - 1].Name +'. '
     else
       S := '';
     S := S + Message;
     inherited OnReadError(Reader, S, Handled);
-   end else
-  inherited;
+  end
+  else
+    inherited;
 end;
 
 { TLibSyntAnalyzer }
@@ -5454,174 +5560,12 @@ end;
 
 { TLoadableComponent }
 
-var
-  CheckExistingName: Boolean = False;
-
-procedure _GetIniValue(const SItem: string; out SKey, SValue: string); inline;
-var
-  N: integer;
-begin
-  N := Pos('=', SItem);
-  if N=0 then
-  begin
-    SKey := '';
-    SValue := '';
-  end
-  else
-  begin
-    SKey:= Copy(SItem, 1, N-1);
-    SValue := Copy(SItem, N+1, MaxInt);
-  end;
-end;
-
-procedure TLoadableComponent.LoadExtraData(const AFileName: string);
-const
-  //Utf8Bom = #$EF#$BB#$BF;
-  sign1 = #$EF;
-  sign2 = #$BB;
-  sign3 = #$BF;
-var
-  F: TextFile;
-  SItem, SKey, SValue: string;
-  Section: (secNone, secComments, secMap, secRef);
-  N: integer;
-begin
-  {$Push}
-  {$IOChecks off}
-  AssignFile(F, AFileName);
-  Reset(F);
-  if IOResult<>0 then exit;
-  {$Pop}
-  Section:= secNone;
-  while not EOF(F) do
-    begin
-      Readln(F, SItem);
-      if SItem='' then Continue;
-      if SItem[1]=';' then Continue;
-
-      //FreePascal writes BOM to ini files
-      if (Length(SItem)>3) and
-         (SItem[1]=sign1) and
-         (SItem[2]=sign2) and
-         (SItem[3]=sign3) then
-        Delete(SItem, 1, 3);
-
-      if SItem='[comments]' then
-      begin
-        Section := secComments;
-        Continue;
-      end;
-      if SItem='[map]' then
-      begin
-        Section := secMap;
-        Continue;
-      end;
-      if SItem='[ref]' then
-      begin
-        Section := secRef;
-        Continue;
-      end;
-      if SItem[1]='[' then
-      begin
-        Section := secNone;
-        Continue;
-      end;
-
-      _GetIniValue(SItem, SKey, SValue);
-      case Section of
-        secComments:
-          begin
-            if SKey='str1' then CommentRangeBegin := SValue else
-            if SKey='str2' then CommentRangeEnd := SValue else
-            if SKey='full1' then CommentFullLinesBegin := SValue else
-            if SKey='full2' then CommentFullLinesEnd := SValue else
-            if SKey='styles_cmt' then StylesOfComments := SValue else
-            if SKey='styles_str' then StylesOfStrings := SValue;
-          end;
-        secMap:
-          begin
-            if ThemeMappingCount<High(ThemeMappingArray) then
-            begin
-              Inc(ThemeMappingCount);
-              ThemeMappingArray[ThemeMappingCount-1].StrFrom := SKey;
-              ThemeMappingArray[ThemeMappingCount-1].StrTo := SValue;
-            end;
-          end;
-        secRef:
-          begin
-            N := StrToIntDef(SKey, -1);
-            if (N>=0) and (N<=High(SubLexerNames)) then
-             SubLexerNames[N] := SValue;
-          end;
-        secNone:
-          begin
-          end;
-      end;
-    end;
-  CloseFile(F);
-end;
-
 procedure TLoadableComponent.LoadFromFile(const AFileName: string);
 var
   Stream: TFileStream;
-  Fmts: TecStylesCollection;
-  Fmt: TecSyntaxFormat;
-  i: integer;
 begin
   FFileName := AFileName;
   Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyWrite);
-  try
-    LoadFromStream(Stream);
-    LoadExtraData(ChangeFileExt(AFileName, '.cuda-lexmap'));
-  finally
-    FreeAndNil(Stream);
-  end;
-
-  {
-  ShowMessage(ExtractFileName(AFileName)+#10+
-    CommentRangeBegin+' '+CommentRangeEnd+#10+
-    StylesOfComments+#10+
-    StylesOfStrings
-    );
-  }
-
-  //Alexey
-  if Self is TecSyntAnalyzer then
-  begin
-    Fmts := TecSyntAnalyzer(Self).Formats;
-    for i := 0 to Fmts.Count-1 do
-    begin
-      Fmt := Fmts[i];
-      if Pos(','+Fmt.DisplayName+',', ','+StylesOfComments+',')>0 then
-        Fmt.TokenKind := etkComment
-      else
-      if Pos(','+Fmt.DisplayName+',', ','+StylesOfStrings+',')>0 then
-        Fmt.TokenKind := etkString;
-    end;
-  end;
-end;
-
-procedure TLoadableComponent.LoadFromResourceID(Instance: Cardinal;
-  ResID: Integer; ResType: string);
-var
-  Stream: TResourceStream;
-begin
-  Stream := TResourceStream.CreateFromID(Instance, ResID,
-    PChar(ResType));
-  try
-    LoadFromStream(Stream);
-  finally
-    FreeAndNil(Stream);
-  end;
-end;
-
-procedure TLoadableComponent.LoadFromResourceName(Instance: Cardinal;
-  const ResName: string; ResType: string);
-var
-  Stream: TResourceStream;
-begin
-  Stream := TResourceStream.Create(Instance, ResName,
-    PChar(ResType));
   try
     LoadFromStream(Stream);
   finally
@@ -5632,69 +5576,41 @@ end;
 procedure TLoadableComponent.LoadFromStream(const Stream: TStream);
 begin
   FSkipNewName := True;
-  CheckExistingName := True;
+  FCheckExistingName := True;
   try
-    FIgnoreAll := False;
+    FIgnoreReadErrors := False;
     LoadComponentFromStream(Self, Stream, OnReadError);
   finally
     FSkipNewName := False;
-    CheckExistingName := False;
+    FCheckExistingName := False;
   end;
-end;
-
-function TLoadableComponent.NotStored: Boolean;
-begin
-  Result := not FSaving;
-end;
-
-function TLoadableComponent.SubLexerName(Index: integer): string;
-begin
-  if (Index>=0) and (Index<=High(SubLexerNames)) then
-    Result := SubLexerNames[Index]
-  else
-    Result := '';
-end;
-
-function TLoadableComponent.ThemeMappingOfStyle(const AName: string): string;
-var
-  ItemPtr: ^TThemeMappingItem;
-  i: integer;
-begin
-  for i := 0 to ThemeMappingCount-1 do
-  begin
-    ItemPtr := @ThemeMappingArray[i];
-    if AName = ItemPtr^.StrFrom then
-      Exit(ItemPtr^.StrTo);
-  end;
-  Result := '';
 end;
 
 procedure TLoadableComponent.OnReadError(Reader: TReader;
   const Message: string; var Handled: Boolean);
 begin
-//  Handled := True;
-  Handled := FIgnoreAll;
+  Handled := FIgnoreReadErrors;
   if not Handled then
    case MessageDlg(Message + sLineBreak + 'Ignore this error?', mtError, [mbYes, mbNo, mbAll], 0) of
      mrYes: Handled := True;
      mrAll: begin
               Handled := True;
-              FIgnoreAll := True;
+              FIgnoreReadErrors := True;
             end;
    end;
 end;
 
-procedure TLoadableComponent.SaveToFile(const FileName: string);
+procedure TLoadableComponent.SaveToFile(const AFileName: string);
 var
   Stream: TStream;
 begin
-  Stream := TFileStream.Create(FileName, fmCreate);
+  Stream := TFileStream.Create(AFileName, fmCreate);
   try
     SaveToStream(Stream);
   finally
     FreeAndNil(Stream);
   end;
-  FFileName := FileName;
+  FFileName := AFileName;
 end;
 
 procedure TLoadableComponent.SaveToStream(Stream: TStream);
@@ -5713,7 +5629,7 @@ var
   n: integer;
 begin
   if not FSkipNewName then
-   if CheckExistingName and (Owner.FindComponent(NewName) <> nil) then
+   if FCheckExistingName and (Owner.FindComponent(NewName) <> nil) then
     begin
      Base := ClassName;
      Delete(Base, 1, 1);
@@ -5877,6 +5793,7 @@ begin
   Result := TecSubAnalyzerRule(inherited Items[Index]);
 end;
 
+(*
 { TecSyntStyles }
 
 constructor TecSyntStyles.Create(AOwner: TComponent);
@@ -5895,7 +5812,7 @@ procedure TecSyntStyles.SetStyles(const Value: TecStylesCollection);
 begin
   FStyles.Assign(Value);
 end;
-
+*)
 
 initialization
   Classes.RegisterClass(TLibSyntAnalyzer);
@@ -5906,7 +5823,7 @@ initialization
     MaxLinesWhenParserEnablesFolding := 10*1000;
     MaxLengthForSZFormat := 40;
     AutoFoldComments := 5;
-    AutoFoldComments_BreakOnEmptyLine := true;
+    AutoFoldComments_BreakOnEmptyLine := True;
   end;
 
 end.

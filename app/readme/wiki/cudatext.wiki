@@ -20,7 +20,7 @@ Features for HTML/CSS coding:
 * HTML tags completion with Tab-key
 * HTML color code underlining
 * HTML tooltips on mouse-over
-* Viewer for picture files (jpeg, png, gif, bmp, ico)
+* Viewer for picture files (jpeg, png, gif, bmp, ico, webp)
 
 Screenshot on Windows:
 
@@ -68,9 +68,9 @@ Screenshot on Windows:
 * [[#Tab_switcher|Tab switcher]] dialog
 * Can split single UI-tab, for single file or 2 different files (helps to work with Differ plugin)
 * Option for "zebra mode"
-* Can drag-and-drop block of text inside the editor
-* Color themes do not affect syntax parser results
+* Color themes are universal, ie they have not per-syntax settings
 * Windows version can use different Python engine (packages in add-ons)
+* [[#Picture_file_viewer|Picture file viewer]] supports zooming of a picture
 * Add-ons do not disappear due to GitHub repository deletions
 
 = Download =
@@ -85,15 +85,15 @@ CudaText has configuration system in JSON files: call menu item "Options / Setti
 
 You can copy JSON comments too. In the user config, include useful lines in the curly braces "{ }", this is JSON format. Trailing comma before "}" is allowed here.
 
-* '''User config'''. File "settings/user.json". Can be opened via menu item "Options / Settings-user".
-* '''Default config'''. File "settings_default/default.json". Can be opened via menu item "Options / Settings-default". CudaText doesn't use this file, it's only for user reference. CudaText only opens this file by the command, and this file is parsed by plugin "Options Editor".
-* '''Lexer specific configs'''. Files "settings/lexer NNN.json". It is layer which is read after user config, when user activates some lexer. E.g. if you open C file, config file "lexer C.json" is read. You should not write "ui_" options to lexer specific configs (it may give weird effects on changing lexer), and some other global options.
-** For (None) lexer, config file is named "lexer -.json".
-** For lite lexers, config files are named with suffix, e.g. "lexer XML ^.json".
-* '''Default lexer specific configs'''. Files "settings_default/lexer NNN.json". It is layer which is read after user config, but before lexer specific config. CudaText provides several such files, with useful defaults.
-* '''Hotkeys config'''. File "settings/keys.json". Special dialog allows to change all hotkeys in CudaText. You should not edit this config file. Dialog is called from "Help / Command palette" by F9. Dialog allows to set 1st and 2nd hotkeys for any command (except dynamically added commands to change lexer).
-* '''Plugin configs'''. Files "settings/cuda_*". Plugins store their settings in there, and files can be in any format (most used are JSON and INI). Good quality plugins provide menu items in "Options / Settings-plugins" to open their config file, or to show configuration dialog.
-* '''History files'''. Files "settings/history*.json". Don't edit them. Mentioned here because sometimes users need to delete their history files (dialog positions, recent files list etc, recent search strings etc).
+;'''User config''': File "settings/user.json". Can be opened via menu item "Options / Settings-user".
+;'''Default config''': File "settings_default/default.json". Can be opened via menu item "Options / Settings-default". CudaText doesn't use this file, it's only for user reference. CudaText only opens this file by the command, and this file is parsed by plugin "Options Editor".
+;'''Lexer specific configs''': Files "settings/lexer NNN.json". It is layer which is read after user config, when user activates some lexer. E.g. if you open C file, config file "lexer C.json" is read. You should not write "ui_" options to lexer specific configs (it may give weird effects on changing lexer), and some other global options.
+* For (None) lexer, config file is named "lexer -.json".
+* For lite lexers, config files are named with suffix, e.g. "lexer XML ^.json".
+;'''Default lexer specific configs''': Files "settings_default/lexer NNN.json". It is layer which is read after user config, but before lexer specific config. CudaText provides several such files, with useful defaults.
+;'''Hotkeys config''': File "settings/keys.json". Special dialog allows to change all hotkeys in CudaText. You should not edit this config file. Dialog is called from "Help / Command palette" by F9. Dialog allows to set 1st and 2nd hotkeys for any command (except dynamically added commands to change lexer).
+;'''Plugin configs''': Files "settings/cuda_*". Plugins store their settings in there, and files can be in any format (most used are JSON and INI). Good quality plugins provide menu items in "Options / Settings-plugins" to open their config file, or to show configuration dialog.
+;'''History files''': Files "settings/history*.json". Don't edit them. Mentioned here because sometimes users need to delete their history files (dialog positions, recent files list etc, recent search strings etc).
 
 == File types config ==
 
@@ -193,37 +193,45 @@ This allows to open in Terminal commands like "cudatext ~/filename.html".
 
 == Mouse shortcuts ==
 
-Note for macOS: use Cmd key instead of Ctrl key, in all commands listed here.
+Note for macOS: use Command key instead of Ctrl key, in all the mouse shortcuts listed here.
 
 Multi-carets:
 
-* Ctrl+click - add/remove caret.
-* Ctrl+drag - add caret with selection.
-* Ctrl+Shift+click - add carets column in several lines (from previous caret to clicked line).
+* Ctrl+click - Add/remove caret.
+* Ctrl+wheel click - Add/remove caret.
+* Ctrl+drag - Add caret with selection.
+* Ctrl+Shift+click - Add column of vertically aligned carets, from previous caret position to the clicked line.
 
 Dragging:
 
-* Alt+drag - select column of text. (Note: it may look weird if word-wrap on, because wrap is not considered here at all. Simple rectangle of coordinates [x1,y1]-[x2,y2] is always selected, even if this gives bad looking screen.)
-* drag on gutter's line numbers - select by entire lines.
-* double-click and immediately drag - select text by words.
-* drag-drop of selected text block is supported. If Ctrl is pressed during the drop (you should press Ctrl after drag is started), block will be copied (not moved) to pointed position.
+* Alt+drag - Make column selection. See [[#Behaviour of column selection]].
+* drag on gutter's line numbers - Select text by entire lines.
+* double-click and immediately drag - Select text by words.
 
 Clicks:
 
-* double-click - select clicked word (see option word_chars).
-* triple-click - select entire line (limited by end-of-lines).
+* double-click - Select clicked word. See the option "nonword_chars".
+* triple-click - Select entire line (block is limited by newline characters).
 
-* middle-button click (with option mouse_mid_click_scroll) - start "Browser Scroll" mode: circle mark appears and mouse moving around this mark auto-scrolls text in 4 directions; speed of scrolling depends on distance of cursor from circle mark (any click to turn off).
-
-* middle-button click (with option mouse_mid_click_paste) - paste from clipboard. This is like in Linux. Additionally it's good to install plugin "Auto-Copy to Clipboard".
+* wheel click - Configurable by option "mouse_middle_click", choices are:
+** Start "browser scrolling" mode: circle mark appears and mouse moving around this mark auto-scrolls text in 4 directions; speed of scrolling depends on distance of cursor from circle mark (any click to turn off).
+** Paste from clipboard. This mimics Linux apps behaviour. With this choice, it's good to install plugin "Auto-Copy to Clipboard".
+** Call "Go to definition" command.
+** Nothing.
 
 Misc:
 
-* Alt+click (with option mouse_goto_definition) - call "Goto definition" command (if plugin installed).
-* Shift+Alt+click - make vertical (column) selection, from first caret to clicked position.
-* Shift+ scroll mouse wheel - scroll text horizontally.
-* Ctrl+ scroll mouse wheel (with option mouse_wheel_zoom) - zoom text in/out.
-* Ctrl+ scroll mouse wheel (on picture preview panel) - zoom picture in/out.
+* Shift+Alt+click - Make vertical (column) selection, from the first caret to the clicked position.
+* Shift+ scroll mouse wheel - Scroll text horizontally.
+* Ctrl+ scroll mouse wheel (with option "mouse_wheel_zoom":true) - Zoom text in/out.
+* Ctrl+ scroll mouse wheel (in the picture viewer) - Zoom picture in/out.
+
+Drag-drop of selected text block:
+
+* Dragging inside single document: if Ctrl is pressed during the drop (you should press Ctrl after dragging is started), block will be copied (not moved) to the pointed position.
+* Dragging to a different document (see [[#Groups of tabs]]): if Ctrl is pressed during the drop, block will be moved (otherwise it will be copied).
+
+Command "Go to definition" can be called by different mouse shortcuts: by Ctrl+Alt+click (default), Alt+click, etc, this depends on option "mouse_goto_definition".
 
 == Multi-carets ==
 
@@ -320,6 +328,7 @@ Most of them are located in the Addons Manager "Install" list.
 * Assembly ARM
 * Assembly AVR
 * Assembly FASM
+* Assembly GNU
 * Assembly JWASM
 * Assembly MASM x86
 * Assembly MIPS
@@ -338,6 +347,7 @@ Most of them are located in the Addons Manager "Install" list.
 * AutoHotkey
 * AutoIt
 * Automake
+* Automation Basic (B&R Automation Studio)
 * AviSynth
 * AWK
 * Ballerina
@@ -440,6 +450,7 @@ Most of them are located in the Addons Manager "Install" list.
 * Julia
 * Kivy
 * KiXtart
+* Koka
 * Kontakt Script Processor (KSP)
 * Kotlin
 * LaTeX
@@ -1073,19 +1084,23 @@ Find/Replace dialog has hotkeys, which work only when this dialog is focused. Ho
 
 [[File:cudatext-find-dlg.png]]
 
-Option buttons have hotkeys too. Hover mouse over them to see floating tooltips about button functions.
+Toggle-buttons have hotkeys too. Hover mouse over them to see floating tooltips about button functions.
 
-* ".*" - Regular expressions - Alt+R
-* "aA" - Case sensitive search - Alt+C
-* "w" - Search for whole words only, ie both sides of found match must be "word boundaries" - Alt+W
-* "O" - Wrapped search: search from beginning after reaching the end (with forward search), and search from end after reaching the beginning (with backward search) - Alt+N
-* "[..]" - Search in selection only - Alt+X
-* "+" - Toggle multi-line mode for both dialog input fields (to add a newline in multi-line fields, press Ctrl+Enter) - Alt+M
-* "?!" - Show confirmation on each replace - Alt+Y
-* "*" - Choose allowed syntax elements: Any / Only comments / Only strings / Only comments+strings / etc. This feature must be supported by lexer (and some lexers are limited, support only "comments" or only "strings" syntax elements). Syntax element is detected from left edge position of a found match.
-* "Hi" - Find and highlight all matches for the current search options. Matches are highlighted in the current editor, with the rounded borders, using the color of "SeparLine" syntax theme item. This highlight is updated on changing the "find what" text, so it is incremental. Editor auto-scrolls to the first found match (pretty much like ST3 editor). The limitation of this feature: a highlighted match has the single font color for the entire match, so if a match lays over several syntax tokens (e.g. number, dot, normal word), the entire match will have the single font color anyway. This "Hi" button is disabled, when current document has too many lines, see the option "find_hi_max_lines".
+Toggle-buttons, ie options, are:
 
-* "$0" - "RegEx substitute for 'Replace with'". Activates "substitute" for replace-action. When off, the replate-with field is taken literally, without interpreting special constructs. When on, the replace-with field is processed for constructs:
+* Toggle-button ".*" - Regular expressions (hotkey Alt+R).
+* Toggle-button "aA" - Case sensitive search (hotkey Alt+C).
+* Toggle-button "w" - Search for whole words only, ie both sides of found match must be "word boundaries" (hotkey Alt+W).
+* Toggle-button "O" - Wrapped search: search from beginning after reaching the end (with forward search), and search from end after reaching the beginning (with backward search) (hotkey Alt+N).
+* Toggle-button "[..]" - Search in selection only (hotkey Alt+X).
+* Toggle-button "+" - Toggle multi-line mode for both dialog input fields. To add a newline in multi-line fields, press Ctrl+Enter. (hotkey Alt+M).
+* Toggle-button "*" - Choose allowed syntax elements: Any / Only comments / Only strings / Only comments+strings / etc. This feature must be supported by lexer (and some lexers are limited, support only "comments" or only "strings" syntax elements). Syntax element is detected from left edge position of a found match.
+* Toggle-button "Hi" - Find and highlight all matches for the current search options. Matches are highlighted in the current editor, with the rounded borders, using the color of "SeparLine" syntax theme item. This highlight is updated on changing the "find what" text, so '''it is incremental search'''. Editor auto-scrolls to the first found match (pretty much like ST3 editor). The limitation of this feature: a highlighted match has the single font color for the entire match, so if a match lays over several syntax tokens (e.g. number, dot, normal word), the entire match will have the single font color anyway. This "Hi" button is disabled, when current document has too many lines, see the option "find_hi_max_lines".
+
+Toggle-buttons for "replace" mode:
+
+* Toggle-button "?!" - Show confirmation on each replace (hotkey Alt+Y).
+* Toggle-button "$0" - "RegEx substitute for 'Replace with'". Activates "substitute" for replace-action. When option is off, the replate-with field is taken literally, without interpreting special constructs. When option is on, the replace-with field is processed for special constructs:
 ** $0: Text of the whole found match
 ** $1 ... $9: Text of the found RegEx group with the index 1...9
 ** \n: NL char
@@ -1358,32 +1373,32 @@ Screenshot shows 3 icon sets at once:
 
 [[File:cudatext_all_icons.png]]
 
-* Icons in the main toolbar. To change them:
-** (Optional) Install add-on(s) of kind "toolbar theme" (each add-on gives additional icon set or several sets).
-** Change option "ui_toolbar_theme" in user.json. Option value is some subfolder in data/toolbaricons.
-** Restart CudaText.
+;Icons in the main toolbar: To change them:
+* (Optional) Install add-on(s) of kind "toolbar theme" (each add-on gives additional icon set or several sets).
+* Change option "ui_toolbar_theme" in user.json. Option value is some subfolder in data/toolbaricons.
+* Restart CudaText.
 
 Note that plugin "Options Editor" makes it easy - for options "ui_toolbar_theme"/"ui_sidebar_theme"/"ui_tree_theme" it shows the combobox dropdown, which is easy to change.
 
-* Icons in the sidebar (vertical band on the left). To change them:
-** (Optional) Install add-on(s) of kind "sidebar theme".
-** Change option "ui_sidebar_theme" in user.json. Option value is some subfolder in data/sideicons.
-** Restart CudaText.
+;Icons in the sidebar (vertical band on the left): To change them:
+* (Optional) Install add-on(s) of kind "sidebar theme".
+* Change option "ui_sidebar_theme" in user.json. Option value is some subfolder in data/sideicons.
+* Restart CudaText.
 
-* Icons in the Code-Tree panel. To change them:
-** Install add-on(s) of kind "codetreeicons" (each add-on gives additional icon set).
-** Change option "ui_tree_theme" in user.json. Option value is some subfolder in data/codetreeicons.
-** Restart CudaText.
+;Icons in the Code-Tree panel: To change them:
+* Install add-on(s) of kind "codetreeicons" (each add-on gives additional icon set).
+* Change option "ui_tree_theme" in user.json. Option value is some subfolder in data/codetreeicons.
+* Restart CudaText.
 
-* Icons in the Project Manager toolbar. To change them:
-** (Optional) Install add-on(s) of kind "proj toolbar theme".
-** Change option in the dialog: "Options / Settings-plugins / Project Manager / Config".
-** Restart CudaText.
+;Icons in the Project Manager toolbar: To change them:
+* (Optional) Install add-on(s) of kind "proj toolbar theme".
+* Change option in the dialog: "Options / Settings-plugins / Project Manager / Config".
+* Restart CudaText.
 
-* Icons in the Project Manager file list, and on UI-tab headers (icons are shown on UI-tab headers by "Tab Icons" plugin). To change them:
-** Install add-on(s) of kind "file type icons".
-** Change option in the dialog: "Options / Settings-plugins / Project Manager / Config".
-** Restart CudaText.
+;Icons in the Project Manager file list, and on UI-tab headers: (icons are shown on UI-tab headers by "Tab Icons" plugin). To change them:
+* Install add-on(s) of kind "file type icons".
+* Change option in the dialog: "Options / Settings-plugins / Project Manager / Config".
+* Restart CudaText.
 
 ==Toolbar==
 CudaText has toolbar on the top, which can be shown by menu item "View / Toggle toolbar".
@@ -1461,15 +1476,26 @@ CudaText suggests to use viewer for files of too big size (bigger than option "u
 
 [[File:cudatext-viewer-asking.png]]
 
-Viewer has not the search support.
-Viewer allows to use "Go to" dialog. In the "Go to" dialog, you can enter "2000" to jump to hex offset 0x2000 (in hex mode, rounded to 16 bytes). If you enter "50%", viewer will jump to the middle. Viewer supports selection of block by mouse, and hotkeys Ctrl+A, Ctrl+C. Viewer supports double-click to select whole word.
+Viewer has only limited search support, ie not all Find-dialog options are enabled, when file viewer is active.
+Viewer allows to use "Go to" dialog. In the "Go to" dialog, you can enter "2000" to jump to hex offset 0x2000 (in hex mode, rounded to 16 bytes). If you enter "50%", viewer will jump to the middle. Viewer supports selection of block by mouse, and hotkeys Ctrl+A (Select all), Ctrl+C (Copy to clipboard). Viewer supports double-click to select whole word.
 
 In viewer mode, you can click statusbar fields:
 * Encoding field. You can change viewer encoding only in non-Unicode modes.
 * Mode field, to change view mode: Text, Binary, Hex, Unciode, Unicode/Hex.
 
+==Picture file viewer==
+CudaText has the emdedded picture file viewer. It's activated when you open a file with the picture file type, see the option "picture_types": BMP, PNG, JPEG, GIF, ICO (Windows icon), WEBP (general picture format), PSD (Photoshop image), TGA (Targa), CUR (Windows cursor).
+
+Viewer supports zooming of an image:
+* use Ctrl + mouse wheel
+* click the statusbar cell with the zoom value, and choose one of predefined zoom values: 33%, 50%, 100%, 150%, 200%, 500%, 1000%, 1500%.
+
+While picture is zoomed so that it's bigger than the current window, you can drag the picture by mouse.
+
+While picture viewer is active, Find/Replace-dialog is disabled.
+
 ==Pair brackets==
-CudaText has built-in pair bracket finder. Before that you needed the plugin Bracket Helper, and now plugin should not be used - it is much slower that built-in code. Bracket finder can highlight pair brackets, when there is only single caret, no selection. It finds symbols "()[]{}<>" (configurable per lexer). Bracket finder respects lexer context, it skips symbols inside syntax comments/strings. If caret is placed not directly on/after a bracket, program will find nearest surrounding brackets.
+CudaText has built-in pair bracket finder. Before that you needed the plugin Bracket Helper, and now plugin should not be used, it is much slower than the built-in code. Bracket finder can highlight pair brackets, when there is only single caret, no selection. It finds symbols "()[]{}<>" (configurable per lexer). Bracket finder respects lexer context, it skips symbols inside syntax comments/strings. If caret is placed not directly on/after a bracket, program will find nearest surrounding brackets.
 
 There are several options:
 * "bracket_highlight"
@@ -1779,35 +1805,40 @@ You can make Pull-Request there, if needed.
 
 ==Kinds of add-ons==
 
-* "plugins". Extensions with Python code. They add events and/or commands. Commands can be called then via "Plugins" top menu, but only if plugin's install.inf file doesn't hide menu items in "Plugins". In any case, all commands can be called via Command Palette dialog.
+;plugins: Extensions with Python code. They add events and/or commands. Commands can be called then via "Plugins" top menu, but only if plugin's install.inf file doesn't hide menu items in "Plugins". In any case, all commands can be called via Command Palette dialog.
 
-* "lexers". Syntax highlighting files. For ex, Arduino lexer adds item "Arduino" to the lexer menu. Some addons can add 2 or more lexers, for ex "HTML nnnnnn" addons often add 2 lexers: one is visible in the lexer menu, another one is hidden (it supports embedded blocks).
+;lexers: Syntax highlighting files. For ex, Arduino lexer adds item "Arduino" to the lexer menu. Some addons can add 2 or more lexers, for ex "HTML nnnnnn" addons often add 2 lexers: one is visible in the lexer menu, another one is hidden (it supports embedded blocks).
 
-* "linters". Sub-plugins for CudaLint plugin. Each supports some lexer (or several similar lexers). To use them, install CudaLint plugin, open your work file, and call CudaLint commands: it calls appropriate linter and shows colored bookmarks on error/warning lines.
+;linters: Sub-plugins for CudaLint plugin. Each supports some lexer (or several similar lexers). To use them, install CudaLint plugin, open your work file, and call CudaLint commands: it calls appropriate linter and shows colored bookmarks on error/warning lines.
 
-* "formatters". Sub-plugins for CudaFormatter plugin. Each supports one or several lexers and can reformat source code for these lexers. Examples: Python ReIndent, JS Sort Imports, AStyle Format.
+;formatters: Sub-plugins for CudaFormatter plugin. Each supports one or several lexers and can reformat source code for these lexers. Examples: Python ReIndent, JS Sort Imports, AStyle Format.
 
-* "tree helpers": Plugins which show Code-Tree structure for some lexer (useful if language is complex, and lexer cannot handle all language complexity).
+;tree helpers: Plugins which show Code-Tree structure for some lexer (useful if language is complex, and lexer cannot handle all language complexity).
 
-* "snippets_ct". Collections of text fragments, for "Snippets" plugin (which is required to use snippets). See details in the [[CudaText_plugins#Snippets]].
+;snippets_ct: Collections of text fragments, for "Snippets" plugin (which is required to use snippets). See details in the [[CudaText_plugins#Snippets]].
 
-* "translations". CudaText UI translations. For ex, JP translation changes all menuitems + dialogs to JP language. Dialogs of plugins are not affected.
+;translations: CudaText UI translations. For ex, JP translation changes all menuitems + dialogs to JP language. Dialogs of plugins are not affected.
 
-* "plugintranslation": Translation of plugin strings to different languages. This includes translation of strings from Python code, and strings from "install.inf" files.
+;plugintranslation: Translation of plugin strings to different languages. This includes translation of strings from Python code, and strings from "install.inf" files.
 
-* "themes". UI/syntax themes for the "Options / Color themes" menu. UI themes change colors of CudaText interface. Syntax themes change colors of words in syntax highlighted files.
+;themes: UI/syntax themes for the "Options / Color themes" menu. UI themes change colors of CudaText interface. Syntax themes change colors of words in syntax highlighted files.
 
-* Icons:
-** "sidebar themes": Icon sets for the sidebar (vertical row of buttons on the left side).
-** "toolbar themes": Icon sets for the main toolbar (horizontal row of buttons on the top).
-** "toolbar x icons": Icon sets for plugin "Config Toolbar", for user-added buttons.
-** "file type icons": Icon sets for the file list of "Project Manager" plugin. Usually these are repackaged icons for VS Code editor.
-** "proj toolbar icons": Icon sets for the toolbar of "Project Manager" plugin.
-** "code-tree icons": Icon sets for the Code-Tree (icons are visible in the Code-Tree with some lexers, e.g. C#).
+;Icons:
+:;sidebar themes: Icon sets for the sidebar (vertical row of buttons on the left side).
 
-* "build systems": Configuration files for different external tools, for the Runner plugin. Runner plugin supports build-systems for Sublime Text 3 (only JSON configs, without support for additional Python codes).
+:;toolbar themes: Icon sets for the main toolbar (horizontal row of buttons on the top).
 
-* "packages": Packages with possible binary files, which will be unpacked to the CudaText installation folder. For the date 2021.08, these are only Python engines, for CudaText Windows build.
+:;toolbar x icons: Icon sets for plugin "Config Toolbar", for user-added buttons.
+
+:;file type icons: Icon sets for the file list of "Project Manager" plugin. Usually these are repackaged icons for VS Code editor.
+
+:;proj toolbar icons: Icon sets for the toolbar of "Project Manager" plugin.
+
+:;code-tree icons: Icon sets for the Code-Tree (icons are visible in the Code-Tree with some lexers, e.g. C#).
+
+;build systems: Configuration files for different external tools, for the Runner plugin. Runner plugin supports build-systems for Sublime Text 3 (only JSON configs, without support for additional Python codes).
+
+;packages: Packages with possible binary files, which will be unpacked to the CudaText installation folder. For the date 2021.08, these are only Python engines, for CudaText Windows build.
 
 =Tech topics=
 
@@ -1815,7 +1846,7 @@ You can make Pull-Request there, if needed.
 
 ===Startup time===
 
-CudaText starts quite fast: about 0.3 sec with about 30 plugins (all preinstalled + some popular plugins), on Linux, on CPU x64 Intel Core i3 3Hz.
+CudaText starts quite fast: about 0.3 sec with about 30 plugins (all preinstalled + some popular plugins), on Linux, on CPU x64 Intel Core i3 3GHz.
 
 If no additional plugins are installed, or Python engine is disabled (ie not configured on Unix, or Python DLL files are deleted on Windows), then it starts even faster.
 If configuration/history are clean, it starts faster.
@@ -2220,6 +2251,28 @@ A2: Plugin "CudaExt" has commands:
 It's good to use these commands with hotkeys Alt+Left and Alt+Right (assign it in the "Command Palette").
 
 ==Unix specific topics==
+
+===In Qt5 version, text is shifting on selection===
+Q: When I select text that is inside a string literal (for example), the beginning of the selection gets a space before it, shifting the selected text to the right. As I select more the text continues to squish around.
+
+A: That's an issue specific to Qt5 version (and macOS, see below). It's fixable by the option "renderer_tweaks" (for Linux: "renderer_tweaks__linux"). Description of this option in the default config:
+
+ Value is a string of several chars:
+ if 'w' in value: Use simplified calculation of average character width.
+                  On Windows, 'w' is good.
+                  On macOS, 'w' is bad.
+                  On GTK2, 'w' is not needed.
+                  On Qt5, 'w' gives various results, it depends on Desktop Environment.
+
+So, on Linux Qt5 version, all you need is to toggle "w" sub-option in the "renderer_tweaks__linux". In the user.json config write one of these lines:
+
+   "renderer_tweaks__linux": "w",
+
+or
+
+   "renderer_tweaks__linux": "",
+
+On macOS, changing the option "renreder_tweaks__mac" is usually not needed - default value works good. But in Qt5 version, CudaText cannot detect Desktop Environment settings, so default value is wrong sometimes.
 
 ===How to reinstall missed files===
 
@@ -2720,7 +2773,7 @@ Color in Pascal format: hex number (6..8 digits) with "$" prefix, or constants. 
 
 ST3: Use feature of editor called "build systems".
 
-CudaText: Use plugin "External Tools", which adds "Tools" item to the top menu, with dialog to add/configure programs and URLs.
+CudaText: Use plugin "External Tools", which adds "Tools" item to the top menu. Or: use plugin "Runner". Both plugins are described here: [[CudaText_plugins]].
 
 ==How to change settings for one OS only?==
 

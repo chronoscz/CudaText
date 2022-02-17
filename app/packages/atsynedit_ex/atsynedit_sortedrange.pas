@@ -14,6 +14,7 @@ uses
   ATStrings,
   ATStringProc,
   ATSynEdit,
+  ATSynEdit_Options,
   ATSynEdit_Carets,
   ATSynEdit_FGL,
   ec_SyntAnal,
@@ -52,7 +53,7 @@ type
     Color: TColor;
     Rule: TecTagBlockCondition;
     ActiveAlways: boolean;
-    Active: array[0..Pred(cMaxStringsClients)] of boolean;
+    Active: array[0..Pred(TATEditorOptions.MaxStringsClients)] of boolean;
     class operator =(const a, b: TATSortedRange): boolean;
     procedure Init(
       const APos1, APos2: TPoint;
@@ -533,8 +534,8 @@ var
   iLine: integer;
 begin
   for iLine:= High(FLineIndexer) downto 0 do
-    SetLength(FLineIndexer[iLine], 0);
-  SetLength(FLineIndexer, 0);
+    FLineIndexer[iLine] := nil;
+  FLineIndexer := nil;
 end;
 
 end.

@@ -198,7 +198,7 @@ begin
 
     ////state
     cfg.SetValue('lang', UiOps.LangName);
-    cfg.SetValue('session', IfThen(UiOps.ReopenSession, ExtractRelativePath(AppFile_OptionsUser, AppSessionName), ''));
+    cfg.SetValue('session', AppSessionName_ForHistoryFile);
     cfg.SetValue('last_cmd', FLastSelectedCommand);
 
     DoOps_SaveHistory_GroupView(cfg);
@@ -212,52 +212,40 @@ begin
     //// @tmsg wants to save session always, even with -ns cmdline opt
   then
   begin
-    fnBase:= GetSessionFilename;
+    fnBase:= AppFile_Session;
     DoOps_SaveSessionsBackups(fnBase);
-    DoOps_SaveSession(fnBase, ASaveModifiedTabs, false);
+    DoOps_SaveSession(fnBase, ASaveModifiedTabs, ASaveModifiedTabs, false);
   end;
 end;
 
 
 procedure TfmMain.DoOps_SaveSessionsBackups(const ASessionFilename: string);
-//keep backups of last n unnamed sessions as 'history session.n.cuda-session'
-var
-  fnTemp, fnTemp2: string;
-  i: integer;
+//keep backups of last N unnamed sessions as 'history session.N.cuda-session'
 begin
-  for i:= UiOps.BackupLastSessions downto 1 do
-  begin
-    fnTemp:= ChangeFileExt(ASessionFilename, Format('.%d.cuda-session', [i]));
-    if i>1 then
-      fnTemp2:= ChangeFileExt(ASessionFilename, Format('.%d.cuda-session', [i-1]))
-    else
-      fnTemp2:= ASessionFilename;
-    if i>=UiOps.BackupLastSessions then
-      if FileExists(fnTemp) then
-        DeleteFile(fnTemp);
-    if FileExists(fnTemp2) then
-      RenameFile(fnTemp2, fnTemp);
-  end;
+  AppMakeBackupFiles(ASessionFilename, '.cuda-session', UiOps.BackupLastSessions);
 end;
 
 function TfmMain.DoOps_SaveSession(const AFileName: string;
-  ASaveModifiedTabs, AByTimer: boolean): boolean;
+  ASaveModifiedFiles, ASaveUntitledTabs, AByTimer: boolean): boolean;
 var
   cfg: TJSONConfig;
   Frame: TEditorFrame;
   Gr: TATGroups;
   Pages: TATPages;
+  sFilename, sFilename2: string;
   nLocalGroup, nGlobalGroup, nTab, i: integer;
-  nCountFiles: integer;
+  nCountFiles, nCountUntitled: integer;
   path, value: string;
-  bModified: boolean;
+  bModified, bUntitled: boolean;
 begin
   Result:= false;
   if AFileName='' then exit;
+
   AppDiskCheckFreeSpace(AFileName);
   DeleteFile(AFileName);
 
   nCountFiles:= 0;
+  nCountUntitled:= 0;
 
   cfg:= TJSONConfig.Create(nil);
   try
@@ -298,24 +286,35 @@ begin
 
     for i:= 0 to FrameCount-1 do
     begin
-      Inc(nCountFiles);
       Frame:= Frames[i];
       if Frame.IsEmpty then Continue;
       if Frame.TabCaption=msgWelcomeTabTitle then Continue; //avoid reopening of '(welcome)' filler text
 
-      if GetAppFilenameIsIgnoredForSession(Frame.FileName) then
+      sFilename:= Frame.GetFileName(Frame.Ed1);
+      if Frame.EditorsLinked then
+        sFilename2:= ''
+      else
+        sFilename2:= Frame.GetFileName(Frame.Ed2);
+
+      if AppFile_IsIgnoredForSession(sFileName) then
       begin
-        MsgLogConsole(Format('NOTE: File "%s" is not saved to session', [Frame.FileName]));
+        MsgLogConsole(Format('NOTE: File "%s" is not saved to session', [sFileName]));
         Continue;
       end;
+
+      bUntitled:= sFilename='';
+      if bUntitled then
+        Inc(nCountUntitled)
+      else
+        Inc(nCountFiles);
 
       path:= '/'+Format('%3.3d', [i]);
 
       GetFrameLocation(Frame, Gr, Pages, nLocalGroup, nGlobalGroup, nTab);
-      bModified:= Frame.Ed1.Modified or ((Frame.GetFileName(Frame.Ed1)='') and not Frame.IsEmpty);
+      bModified:= Frame.Ed1.Modified or (bUntitled and not Frame.IsEmpty);
 
       cfg.SetValue(path+'/modified', bModified);
-      cfg.SetValue(path+'/file', AppCollapseHomeDirInFilename(Frame.FileName));
+      cfg.SetValue(path+'/file', AppCollapseHomeDirInFilename(sFileName));
 
       if bModified then
         cfg.SetValue(path+'/tab_title', Frame.TabCaption);
@@ -340,31 +339,33 @@ begin
         cfg.DeleteValue(path+'/v_pos');
         }
 
-      if bModified and ASaveModifiedTabs and UiOps.HistoryItems[ahhText] then
-      begin
-        cfg.SetValue(path+'/text', Frame.Editor.Text);
-        if (Frame.FileName<>'') and FileExists(Frame.FileName) then
-          cfg.SetValue(path+'/file_date', FormatFileDateAsNiceString(Frame.FileName));
-      end;
+      if bModified and UiOps.HistoryItems[ahhText] then
+        if (not bUntitled and ASaveModifiedFiles) or
+          (bUntitled and ASaveUntitledTabs) then
+        begin
+          cfg.SetValue(path+'/text', Frame.Ed1.Text);
+          if (not bUntitled) and FileExists(sFileName) then
+            cfg.SetValue(path+'/file_date', FormatFileDateAsNiceString(sFileName));
+          Frame.VersionInSession:= Frame.Ed1.Strings.ModifiedVersion;
+        end;
 
       Frame.DoSaveHistoryEx(Frame.Ed1, cfg, path, true{AForSession});
 
       //save info about paired-tab to subkey "pair"
-      if (not Frame.EditorsLinked) and (Frame.FileName2<>'') then
+      if sFileName2<>'' then
       begin
         path+= '/pair';
 
         bModified:= Frame.Ed2.Modified;
         cfg.SetValue(path+'/modified', bModified);
-        cfg.SetValue(path+'/file', AppCollapseHomeDirInFilename(Frame.FileName2));
+        cfg.SetValue(path+'/file', AppCollapseHomeDirInFilename(sFileName2));
 
-        if UiOps.HistoryItems[ahhText] then
-         if bModified then
-         begin
+        if bModified and UiOps.HistoryItems[ahhText] then
+        begin
           cfg.SetValue(path+'/text', Frame.Ed2.Text);
-          if FileExists(Frame.FileName2) then
-            cfg.SetValue(path+'/file_date', FormatFileDateAsNiceString(Frame.FileName2));
-         end;
+          if FileExists(sFileName2) then
+            cfg.SetValue(path+'/file_date', FormatFileDateAsNiceString(sFileName2));
+        end;
 
         Frame.DoSaveHistoryEx(Frame.Ed2, cfg, path, true{AForSession});
       end;
@@ -381,9 +382,11 @@ begin
 
   if UiOps.LogSessions then
   begin
-    value:= 'Saved session: "'+ExtractFileName(AFileName)+'", '+IntToStr(nCountFiles)+' file(s)';
+    value:= Format('Saved session: "%s", %d file(s)', [ExtractFileName(AFileName), nCountFiles]);
+    if nCountUntitled>0 then
+      value+= Format(' + %d untitled', [nCountUntitled]);
     if AByTimer then
-      value+= ', by timer at '+TimeToStr(Now);
+      value+= Format(', by timer at %s', [TimeToStr(Now)]);
     MsgLogConsole(value);
   end;
 end;
@@ -408,8 +411,7 @@ var
   bModified: boolean;
   sText: UnicodeString;
   bExist, bExist2: boolean;
-  sDateSaved, sDateCurrent: string;
-  Params: TAppVariantArray;
+  sDateSaved, sDateCurrent, sMessage: string;
   CurTabs: TATTabs;
   nTick: QWord;
 const
@@ -423,9 +425,9 @@ begin
   //fix issue #3734
   if not IsDefaultSessionActive then
   begin
-    sFilename:= GetSessionFilename;
+    sFilename:= AppFile_Session;
     if not SameFileName(sFilename, AFileName) then //fix issue #3744
-      DoOps_SaveSession(sFilename, false, false);
+      DoOps_SaveSession(sFilename, false, false, false);
     sFilename:= '';
   end;
 
@@ -436,7 +438,7 @@ begin
     if Frames[0].IsEmpty then
       nCountFilesBefore:= 0;
 
-  FSessionIsClosing:= true;
+  AppSessionIsClosing:= true;
   try
     if not DoFileCloseAll(true) then
     begin
@@ -444,7 +446,7 @@ begin
       exit;
     end;
   finally
-    FSessionIsClosing:= false;
+    AppSessionIsClosing:= false;
   end;
 
   nTick:= GetTickCount64;
@@ -467,7 +469,7 @@ begin
       end;
     end;
 
-    FSessionIsLoading:= true;
+    AppSessionIsLoading:= true;
     DoOps_LoadHistory_GroupView(cfg); //reads to variables
     DoApplyInitialGroupSizes; //applies that variables
 
@@ -585,8 +587,7 @@ begin
 
         //event on_open was blocked in DoFileOpen, call it here
         //(plugin "Tab Icons" needs it)
-        SetLength(Params, 0);
-        DoPyEvent(Frame.Ed1, cEventOnOpen, Params);
+        DoPyEvent(Frame.Ed1, cEventOnOpen, []);
       end;
     end;
 
@@ -596,14 +597,9 @@ begin
       CurTabs:= Groups.Pages[i].Tabs;
       nIndex:= cfg.GetValue('/tab_index/g'+IntToStr(i), -1);
       nIndex:= Max(0, Min(nIndex, CurTabs.TabCount-1));
-      with CurTabs do
-       if TabCount>0 then
-        if TabIndex<>nIndex then
-          TabIndex:= nIndex
-        else
-        //default TabIndex is 0, but we need to show tab anyway
-        if TabIndex=0 then
-          TabIndex:= 0;
+      //don't check that index is different, force set index; this fixes e.g. bug #3892
+      if CurTabs.TabCount>0 then
+        CurTabs.TabIndex:= nIndex;
     end;
 
     //restore group-index
@@ -651,29 +647,37 @@ begin
 
     Result:= true;
   finally
-    FSessionIsLoading:= false;
+    AppSessionIsLoading:= false;
     list.Free;
     cfg.Free;
   end;
 
-  nTick:= (GetTickCount64-nTick) div 10 * 10;
-
   if UiOps.LogSessions then
   begin
-    sText:= 'Loaded session: "'+ExtractFileName(AFileName)+'", '+IntToStr(nTick)+'ms, '+IntToStr(nCountFiles)+' file(s)';
+    nTick:= (GetTickCount64-nTick) div 10 * 10;
+    sMessage:= Format('Loaded session: "%s", %dms, %d file(s)', [ExtractFileName(AFileName), nTick, nCountFiles]);
     if nCountFilesModified>0 then
-      sText+= ' + '+IntToStr(nCountFilesModified)+' modified';
-    MsgLogConsole(sText);
+      sMessage+= Format(' + %d modified', [nCountFilesModified]);
+    MsgLogConsole(sMessage);
   end;
 
   //don't wait until plugin sets session name in PROC_SET_SESSION,
   //it's needed in on_state
   AppSessionName:= AFileName;
 
-  if (nCountFilesBefore>0) or (nCountFiles>0) then
+  if (nCountFilesBefore>0) or (nCountFiles+nCountFilesModified>0) then
     DoPyEvent_AppState(APPSTATE_SESSION_LOAD)
   else
-    DoPyEvent_AppState(APPSTATE_SESSION_LOAD_FAIL)
+    DoPyEvent_AppState(APPSTATE_SESSION_LOAD_FAIL);
+
+  Frame:= CurrentFrame;
+  if Assigned(Frame) then
+  begin
+    DoOnTabFocusFinalization(Frame);
+
+    //python 'on_caret' is disabled during session loading, so fire it here
+    Frame.Ed1.DoEventCarets;
+  end;
 end;
 
 procedure TfmMain.DoOps_LoadHistory_GroupView(cfg: TJsonConfig);
@@ -820,6 +824,11 @@ begin
     if FOption_AllowSessionLoad=aalsEnable then
     begin
       AppSessionName:= cfg.GetValue('session', AppSessionName);
+
+      //workaround for bad saved values like '../../../', with and without filename
+      while SBeginsWith(AppSessionName, '..'+DirectorySeparator) do
+        Delete(AppSessionName, 1, 3);
+
       if not IsDefaultSessionActive then
       begin
         AppSessionName:= AppExpandFileNameWithDir(AppSessionName, AppDir_Settings);
@@ -902,7 +911,7 @@ begin
 
   if FileExists(fn) then
   try
-    DoOps_LoadOptions(fn, EditorOps);
+    DoOps_LoadOptions(fn, EditorOps, true);
     DoApplyAllOps;
   finally
     DeleteFileUTF8(fn);
@@ -918,7 +927,12 @@ var
   s: string;
   N: integer;
 begin
-  Application.MainFormOnTaskBar:= cfg.GetValue('ui_taskbar_mode'+cOptionSystemSuffix, Application.MainFormOnTaskBar);
+  Application.{%H-}MainFormOnTaskBar:= cfg.GetValue('ui_taskbar_mode'+cOptionSystemSuffix, Application.{%H-}MainFormOnTaskBar);
+
+  ATEditorScalePercents:= cfg.GetValue('ui_scale'+cOptionSystemSuffix, 0);
+  ATEditorScaleFontPercents:= cfg.GetValue('ui_scale_font'+cOptionSystemSuffix, 100);
+  if ATEditorScalePercents=0 then
+    ATEditorScalePercents:= 100*Screen.PixelsPerInch div 96;
 
   ATEditorOptions.FlickerReducingPause:= cfg.GetValue('renderer_anti_flicker'+cOptionSystemSuffix, ATEditorOptions.FlickerReducingPause);
   ATEditorOptions.CharSizeProportional:= cfg.GetValue('unicode_proportional', ATEditorOptions.CharSizeProportional);
@@ -1008,22 +1022,23 @@ end;
 
 procedure TfmMain.DoOps_LoadOptions_Editor(cfg: TJSONConfig; var Op: TEditorOps);
 begin
-  Op.OpFontName:= cfg.GetValue(OpStr_FontName, Op.OpFontName);
-  Op.OpFontName_i:= cfg.GetValue(OpStr_FontName_i, Op.OpFontName_i);
-  Op.OpFontName_b:= cfg.GetValue(OpStr_FontName_b, Op.OpFontName_b);
-  Op.OpFontName_bi:= cfg.GetValue(OpStr_FontName_bi, Op.OpFontName_bi);
+  Op.OpFontName:= cfg.GetValue('font_name'+cOptionSystemSuffix, Op.OpFontName);
+  Op.OpFontName_i:= cfg.GetValue('font_name_i'+cOptionSystemSuffix, Op.OpFontName_i);
+  Op.OpFontName_b:= cfg.GetValue('font_name_b'+cOptionSystemSuffix, Op.OpFontName_b);
+  Op.OpFontName_bi:= cfg.GetValue('font_name_bi'+cOptionSystemSuffix, Op.OpFontName_bi);
 
-  Op.OpFontSize:= Abs(cfg.GetValue(OpStr_FontSize, Op.OpFontSize)); //Abs() for macOS
-  Op.OpFontSize_i:= Abs(cfg.GetValue(OpStr_FontSize_i, Op.OpFontSize_i));
-  Op.OpFontSize_b:= Abs(cfg.GetValue(OpStr_FontSize_b, Op.OpFontSize_b));
-  Op.OpFontSize_bi:= Abs(cfg.GetValue(OpStr_FontSize_bi, Op.OpFontSize_bi));
+  Op.OpFontSize:= Abs(cfg.GetValue('font_size'+cOptionSystemSuffix, Op.OpFontSize)); //Abs() for macOS
+  Op.OpFontSize_i:= Abs(cfg.GetValue('font_size_i'+cOptionSystemSuffix, Op.OpFontSize_i));
+  Op.OpFontSize_b:= Abs(cfg.GetValue('font_size_b'+cOptionSystemSuffix, Op.OpFontSize_b));
+  Op.OpFontSize_bi:= Abs(cfg.GetValue('font_size_bi'+cOptionSystemSuffix, Op.OpFontSize_bi));
+
   Op.OpFontSize_original:= Op.OpFontSize;
   Op.OpFontSize_original_i:= Op.OpFontSize_i;
   Op.OpFontSize_original_b:= Op.OpFontSize_b;
   Op.OpFontSize_original_bi:= Op.OpFontSize_bi;
 
-  Op.OpFontQuality:= TFontQuality(cfg.GetValue(OpStr_FontQuality, Ord(Op.OpFontQuality)));
-  Op.OpFontLigatures:= cfg.GetValue(OpStr_FontLigatures, Op.OpFontLigatures);
+  Op.OpFontQuality:= TFontQuality(cfg.GetValue('font_quality'+cOptionSystemSuffix, Ord(Op.OpFontQuality)));
+  Op.OpFontLigatures:= cfg.GetValue('font_ligatures', Op.OpFontLigatures);
 
   Op.OpActiveBorderRaw:= cfg.GetValue('ui_active_border', Op.OpActiveBorderRaw);
   Op.OpActiveBorderInControls:= Op.OpActiveBorderRaw > 0;
@@ -1035,8 +1050,10 @@ begin
 
   Op.OpTabSize:= cfg.GetValue('tab_size', Op.OpTabSize);
   Op.OpTabSpaces:= cfg.GetValue('tab_spaces', Op.OpTabSpaces);
+
   Op.OpMaxLineLenToTokenize:= cfg.GetValue('max_line_len_parsed', Op.OpMaxLineLenToTokenize);
   Op.OpMaxLineLenForBracketFinder:= Op.OpMaxLineLenToTokenize; //do we need separate option?
+  ATLiteLexerMaxLineLength:= Op.OpMaxLineLenToTokenize;
 
   Op.OpOverwriteSel:= cfg.GetValue('ovr_sel', Op.OpOverwriteSel);
   Op.OpOverwriteOnPaste:= cfg.GetValue('ovr_on_paste', Op.OpOverwriteOnPaste);
@@ -1103,7 +1120,7 @@ begin
   Op.OpBracketSymbols:= cfg.GetValue('bracket_symbols', op.OpBracketSymbols);
   Op.OpBracketDistance:= cfg.GetValue('bracket_distance', op.OpBracketDistance);
 
-  Op.OpWrapMode:= cfg.GetValue('wrap_mode', Op.OpWrapMode);
+  Op.OpWrapMode:= Min(cfg.GetValue('wrap_mode', Op.OpWrapMode), Ord(High(TATEditorWrapMode)));
   Op.OpWrapIndented:= cfg.GetValue('wrap_indented', Op.OpWrapIndented);
   Op.OpWrapEnabledMaxLines:= cfg.GetValue('wrap_enabled_max_lines', Op.OpWrapEnabledMaxLines);
 
@@ -1159,6 +1176,7 @@ begin
   Op.OpNonWordChars:= cfg.GetValue('nonword_chars', Op.OpNonWordChars);
   Op.OpFoldStyle:= cfg.GetValue('fold_style', Op.OpFoldStyle);
   Op.OpFoldTooltipShow:= cfg.GetValue('fold_tooltip_show', Op.OpFoldTooltipShow);
+  Op.OpFoldIconForMinimalRangeHeight:= cfg.GetValue('fold_icon_min_range', Op.OpFoldIconForMinimalRangeHeight);
 
   Op.OpIndentAuto:= cfg.GetValue('indent_auto', Op.OpIndentAuto);
   Op.OpIndentAutoKind:= cfg.GetValue('indent_kind', Op.OpIndentAutoKind);
@@ -1167,6 +1185,7 @@ begin
   Op.OpUnIndentKeepsAlign:= cfg.GetValue('unindent_keeps_align', Op.OpUnIndentKeepsAlign);
   Op.OpIndentMakesWholeLineSel:= cfg.GetValue('indent_makes_whole_line_sel', Op.OpIndentMakesWholeLineSel);
 
+  Op.OpMouseGotoDefinition:= cfg.GetValue('mouse_goto_definition', Op.OpMouseGotoDefinition);
   Op.OpMouse2ClickDragSelectsWords:= cfg.GetValue('mouse_2click_drag_select_words', Op.OpMouse2ClickDragSelectsWords);
   Op.OpMouseDragDrop:= cfg.GetValue('mouse_drag_drop', Op.OpMouseDragDrop);
   Op.OpMouseMiddleClickAction:= cfg.GetValue('mouse_middle_click', Op.OpMouseMiddleClickAction);
@@ -1208,10 +1227,10 @@ begin
   UiOps.OutputFontName:= cfg.GetValue(OpStr_UiFontOutputName, UiOps.OutputFontName);
   UiOps.OutputFontSize:= Abs(cfg.GetValue(OpStr_UiFontOutputSize, UiOps.OutputFontSize)); //Abs for macOS
 
-  UiOps.StatusbarFontName:= cfg.GetValue(OpStr_UiFontStatusbarName, UiOps.StatusbarFontName);
-  UiOps.StatusbarFontSize:= Abs(cfg.GetValue(OpStr_UiFontStatusbarSize, UiOps.StatusbarFontSize)); //Abs for macOS
+  UiOps.StatusbarFontName:= cfg.GetValue('ui_font_statusbar_name'+cOptionSystemSuffix, UiOps.StatusbarFontName);
+  UiOps.StatusbarFontSize:= Abs(cfg.GetValue('ui_font_statusbar_size'+cOptionSystemSuffix, UiOps.StatusbarFontSize)); //Abs for macOS
 
-  UiOps.DoubleBuffered:= cfg.GetValue(OpStr_UiDoubleBuffered, UiOps.DoubleBuffered);
+  UiOps.DoubleBuffered:= cfg.GetValue('ui_buffered'+cOptionSystemSuffix, UiOps.DoubleBuffered);
 
   UiOps.StatusNoSel:= cfg.GetValue('ui_statusbar_no_sel', UiOps.StatusNoSel);
   UiOps.StatusSmallSel:= cfg.GetValue('ui_statusbar_small_sel', UiOps.StatusSmallSel);
@@ -1222,11 +1241,6 @@ begin
   UiOps.StatusTime:= Max(1, Min(60, cfg.GetValue('ui_statusbar_time', UiOps.StatusTime)));
 
   UiOps.ShowTitlePath:= cfg.GetValue('ui_title_path', UiOps.ShowTitlePath);
-
-  UiOps.Scale:= cfg.GetValue('ui_scale'+cOptionSystemSuffix, 0);
-  UiOps.ScaleFont:= cfg.GetValue('ui_scale_font'+cOptionSystemSuffix, 100);
-  if UiOps.Scale=0 then
-    UiOps.Scale:= 100*Screen.PixelsPerInch div 96;
 
   UiOps.ReopenSession:= cfg.GetValue('ui_reopen_session', UiOps.ReopenSession);
   UiOps.ReopenSessionWithCmdLine:= cfg.GetValue('ui_reopen_session_cmdline', UiOps.ReopenSessionWithCmdLine);
@@ -1253,8 +1267,6 @@ begin
   UiOps.ReloadFollowTail:= cfg.GetValue('ui_reload_tail', UiOps.ReloadFollowTail);
   UiOps.ReloadUnsavedConfirm:= cfg.GetValue('ui_reload_unsaved_confirm', UiOps.ReloadUnsavedConfirm);
   UiOps.FullScreen:= cfg.GetValue('ui_fullscreen', UiOps.FullScreen);
-
-  UiOps.MouseGotoDefinition:= cfg.GetValue('mouse_goto_definition', UiOps.MouseGotoDefinition);
 
   UiOps.Emmet_AddSlashToEmptyTags:= cfg.GetValue('emmet_add_slash_to_empty_tags', UiOps.Emmet_AddSlashToEmptyTags);
   UiOps.Emmet_CommentTags:= cfg.GetValue('emmet_comment_tags', UiOps.Emmet_CommentTags);
@@ -1435,7 +1447,7 @@ begin
   UiOps.NewdocEnc:= cfg.GetValue('newdoc_encoding', UiOps.NewdocEnc);
   UiOps.NewdocEnds:= cfg.GetValue('newdoc_ends', UiOps.NewdocEnds);
 
-  UiOps.DefaultEncUtf8:= cfg.GetValue(OpStr_DefEncodingIsUtf8, UiOps.DefaultEncUtf8);
+  UiOps.DefaultEncUtf8:= cfg.GetValue('def_encoding_utf8'+cOptionSystemSuffix, UiOps.DefaultEncUtf8);
   UiOps.ViewerBinaryWidth:= cfg.GetValue('viewer_binary_width', UiOps.ViewerBinaryWidth);
   UiOps.ViewerNonPrintable:= cfg.GetValue('viewer_unprinted', UiOps.ViewerNonPrintable);
 
@@ -1453,37 +1465,42 @@ begin
 end;
 
 
-procedure TfmMain.DoOps_LoadOptions(const fn: string; var Op: TEditorOps;
-  AllowUiOps: boolean=true; AllowGlobalOps: boolean=true);
+procedure TfmMain.DoOps_LoadOptions(const AFileName: string; var Ops: TEditorOps; AllowGlobalOps: boolean);
 var
   cfg: TJsonConfig;
-  NTick: QWord;
+  NTick, NTick2: QWord;
 begin
   NTick:= GetTickCount64;
 
   cfg:= TJsonConfig.Create(nil);
   try
     try
-      cfg.Filename:= fn;
+      cfg.Filename:= AFileName;
     except
       on E: Exception do
       begin
-        MsgBadConfig(fn, E.Message);
+        MsgBadConfig(AFileName, E.Message);
         Exit
       end;
     end;
 
     if AllowGlobalOps then
+    begin
       DoOps_LoadOptions_Global(cfg);
-
-    if AllowUiOps then
       DoOps_LoadOptions_Ui(cfg);
+    end;
 
-    DoOps_LoadOptions_Editor(cfg, Op);
+    NTick2:= GetTickCount64;
+    DoOps_LoadOptions_Editor(cfg, Ops);
+    if UiOps.LogConsoleDetailedStartupTime then
+    begin
+      NTick2:= GetTickCount64-NTick2;
+      MsgLogConsole(Format('Loaded lexer config "%s": %dms', [ExtractFileName(AFileName), NTick2]));
+    end;
 
     //don't show if we only load lexer-specific config
     if UiOps.LogConsoleDetailedStartupTime then
-      if AllowUiOps and AllowGlobalOps then
+      if AllowGlobalOps then
       begin
         NTick:= GetTickCount64-NTick;
         MsgLogConsole(Format('Loaded configs: %dms', [NTick]));
@@ -1504,8 +1521,8 @@ begin
   if F=nil then exit;
 
   CurLexer:= F.LexerName[Ed];
-  FilenameDefault:= GetAppLexerSpecificConfig(CurLexer, true);
-  FilenameUser:= GetAppLexerSpecificConfig(CurLexer, false);
+  FilenameDefault:= AppFile_LexerSpecificConfig(CurLexer, true);
+  FilenameUser:= AppFile_LexerSpecificConfig(CurLexer, false);
 
   bExistsDefault:= FileExists(FilenameDefault);
   bExistsUser:= FileExists(FilenameUser);
@@ -1517,12 +1534,12 @@ begin
 
     if bExistsDefault then
     begin
-      DoOps_LoadOptions(FilenameDefault, Ops, false, false);
+      DoOps_LoadOptions(FilenameDefault, Ops, false);
     end;
 
     if bExistsUser then
     begin
-      DoOps_LoadOptions(FilenameUser, Ops, false, false);
+      DoOps_LoadOptions(FilenameUser, Ops, false);
     end;
 
     DoApplyFrameOps(F, Ops, true);
@@ -1536,8 +1553,8 @@ begin
   DoOps_DialogFont(
     EditorOps.OpFontName,
     EditorOps.OpFontSize,
-    OpStr_FontName,
-    OpStr_FontSize);
+    'font_name'+cOptionSystemSuffix,
+    'font_size'+cOptionSystemSuffix);
   DoApplyFont_Text;
 end;
 
@@ -1591,6 +1608,7 @@ var
   dlg: TFontDialog;
   cfg: TJsonConfig;
   fn: string;
+  bSizeValid: boolean;
 begin
   fn:= AppFile_OptionsUser;
   if not FileExists(fn) then
@@ -1605,7 +1623,9 @@ begin
     dlg.Font.Size:= OpSize;
     if not dlg.Execute then exit;
     OpName:= dlg.Font.Name;
-    OpSize:= dlg.Font.Size;
+    bSizeValid:= dlg.Font.Size>=7; //workaround for issue #3900: Win10 returns font size=0
+    if bSizeValid then
+      OpSize:= dlg.Font.Size;
   finally
     FreeAndNil(dlg);
   end;
@@ -1616,7 +1636,8 @@ begin
       cfg.Formatted:= true;
       cfg.Filename:= fn;
       cfg.SetValue(AConfigStrName, OpName);
-      cfg.SetValue(AConfigStrSize, OpSize);
+      if bSizeValid then
+        cfg.SetValue(AConfigStrSize, OpSize);
     except
     end;
   finally
@@ -1634,7 +1655,7 @@ var
   bDisFree: boolean;
 begin
   bDisFree:= ShowDistractionFree;
-  DoOps_LoadOptions(AppFile_OptionsUser, EditorOps);
+  DoOps_LoadOptions(AppFile_OptionsUser, EditorOps, true);
   DoApplyAllOps;
 
   MsgStatus(msgStatusReadingOps);

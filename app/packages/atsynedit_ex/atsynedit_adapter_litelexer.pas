@@ -94,6 +94,9 @@ type
     property OnApplyStyle: TATLiteLexer_ApplyStyle read FOnApplyStyle write FOnApplyStyle;
   end;
 
+var
+  ATLiteLexerMaxLineLength: integer = 8*1024;
+
 implementation
 
 { TATLiteLexers }
@@ -186,6 +189,7 @@ begin
   Files:= TStringList.Create;
   try
     FindAllFiles(Files, ADir, '*.json;*.cuda-litelexer', false);
+    Files.UseLocale:= false;
     Files.Sorted:= true;
 
     for i:= 0 to Files.Count-1 do
@@ -375,7 +379,12 @@ begin
   if Application.Terminated then exit;
   Ed:= Sender as TATSynEdit;
 
-  EdLine:= Ed.Strings.Lines[ALineIndex];
+  //this is to prevent big slowdown on huge line length=40M, eg single line XML with XML^ lite lexer
+  if Ed.Strings.LinesLen[ALineIndex]>ATLiteLexerMaxLineLength then
+    EdLine:= Ed.Strings.LineSub(ALineIndex, 1, ATLiteLexerMaxLineLength)
+  else
+    EdLine:= Ed.Strings.Lines[ALineIndex];
+
   NParts:= 0;
   NPos:= 0;
   bLastFound:= false;

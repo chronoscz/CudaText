@@ -16,6 +16,7 @@ uses
   IniFiles, ColorBox, StdCtrls, ExtCtrls,
   Types, LazUTF8, LazFileUtils,
   LCLType,
+  ATSynEdit_Options,
   ec_SyntAnal,
   ec_syntax_format,
   formlexerstyle,
@@ -76,7 +77,7 @@ var
   ini: TIniFile;
   fn: string;
 begin
-  fn:= GetAppLangFilename;
+  fn:= AppFile_Language;
   if not FileExists(fn) then exit;
   ini:= TIniFile.Create(fn);
   try
@@ -213,10 +214,10 @@ procedure TfmColorSetup.FormShow(Sender: TObject);
 begin
   Localize;
 
-  Width:= AppScale(Width);
-  Height:= AppScale(Height);
-  List.Width:= AppScale(List.Width);
-  ListStyles.Width:= AppScale(ListStyles.Width);
+  Width:= ATEditorScale(Width);
+  Height:= ATEditorScale(Height);
+  List.Width:= ATEditorScale(List.Width);
+  ListStyles.Width:= ATEditorScale(ListStyles.Width);
   UpdateFormOnTop(Self);
 
   PanelUi.Align:= alClient;

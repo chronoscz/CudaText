@@ -3,6 +3,7 @@ import re
 import collections
 import json
 import stat
+import copy
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from .projman_glob import *
@@ -148,6 +149,7 @@ def _toolbar_add_btn(h_bar, hint, icon=-1, command=''):
 
 
 class Command:
+    goto_history = []
 
     title ="Project"    # No _() here, the translation is offered in "translation template.ini".
     menuitems = (
@@ -376,7 +378,7 @@ class Command:
         # sort folders first, then by extension
         path = Path(node)
         return path.is_file(), path.suffix.upper(), path.name.upper()
-    
+
     @staticmethod
     def node_ordering_direntry(path):
         # node_ordering() for DirEntry
@@ -398,6 +400,7 @@ class Command:
         self.project = dict(nodes=[])
         self.project_file_path = None
         self.update_global_data()
+        self.goto_history = []
         app_proc(PROC_SET_FOLDER, '')
         app_proc(PROC_SET_PROJECT, '')
 
@@ -611,13 +614,13 @@ class Command:
                 raise # good to see the error
                 return
 
-        for path in nodes:            
+        for path in nodes:
             # DirEntry or Path?
             if isinstance(path, Path):
                 spath = str(path)
             else:
                 spath = path.path
-            is_dir = path.is_dir() 
+            is_dir = path.is_dir()
             sname = path.name
             if is_win_root(spath):
                 sname = spath
@@ -678,16 +681,27 @@ class Command:
         if path is None:
             path = dlg_file(True, "", "", PROJECT_DIALOG_FILTER)
         if path:
+            proj_dir = os.path.dirname(path)
+            def expand_macros(s):
+                return s.replace('{ProjDir}', proj_dir, 1)
+
             if Path(path).exists():
                 print(_('Loading project: ') + collapse_filename(path))
                 with open(path, encoding='utf8') as fin:
                     self.project = json.load(fin)
+
+                    if 'nodes' in self.project:
+                        for i in range(len(self.project['nodes'])):
+                            self.project['nodes'][i] = expand_macros(self.project['nodes'][i])
+                    #print('Loaded project:', self.project)
+
                     self.project_file_path = Path(path)
                     self.add_recent(path)
                     self.action_refresh()
                     self.save_options()
 
                 self.update_global_data()
+                self.goto_history = []
 
                 for fn in self.project["nodes"]:
                     if os.path.isdir(fn):
@@ -741,6 +755,7 @@ class Command:
             self.action_save_project_as(self.project_file_path)
 
     def action_save_project_as(self, path=None):
+
         need_refresh = path is None
         if path is None:
             if self.project_file_path:
@@ -750,13 +765,26 @@ class Command:
             path = dlg_file(False, "", project_path, PROJECT_DIALOG_FILTER)
 
         if path:
+            proj_dir = os.path.dirname(path)
+            def collapse_macros(s):
+                fn = s
+                if (fn+os.sep).startswith(proj_dir+os.sep):
+                    fn = fn.replace(proj_dir, '{ProjDir}', 1)
+                return fn
+
             path = Path(path)
             if path.suffix != PROJECT_EXTENSION:
                 path = path.parent / (path.name + PROJECT_EXTENSION)
 
+            # pre-processing of dict before saving
+            d = copy.deepcopy(self.project)
+            if 'nodes' in d:
+                for i in range(len(d['nodes'])):
+                    d['nodes'][i] = collapse_macros(d['nodes'][i])
+
             self.project_file_path = path
             with path.open("w", encoding='utf8') as fout:
-                json.dump(self.project, fout, indent=4)
+                json.dump(d, fout, indent=4)
 
             self.update_global_data()
             print(_('Saving project: ') + collapse_filename(str(path)))
@@ -1050,6 +1078,7 @@ class Command:
             return
 
         files.sort()
+        files = self.goto_history + files
         files_nice = [os.path.basename(fn)+'\t'+collapse_filename(os.path.dirname(fn)) for fn in files]
 
         res = dlg_menu(DMENU_LIST_ALT+DMENU_NO_FULLFILTER, #fuzzy search is needed for users
@@ -1058,9 +1087,14 @@ class Command:
                        )
         if res is None:
             return
+        fn = files[res]
+
+        if fn in self.goto_history:
+            self.goto_history.remove(fn)
+        self.goto_history.insert(0, fn)
 
         and_open = self.options.get('goto_open', False)
-        self.jump_to_filename(files[res], and_open)
+        self.jump_to_filename(fn, and_open)
 
     def jump_to_filename(self, filename, and_open=False):
         """ Find filename in entire project and focus its tree node """
@@ -1243,19 +1277,24 @@ class Command:
             msg_status(_('Project main file is not set'))
 
     def enum_all_files(self):
-
-        import glob
-        files = []
-
+        files, dirs = [], []
         for root in self.project['nodes']:
             if os.path.isdir(root):
-                #f = glob.glob(os.path.join(root, '**', '*'), recursive=True)
-                ## glob.glob cannot find dot-files, so using Path().glob instead:
-                f = [str(f) for f in Path(root).glob('**/*') if f.is_file()]
-                files.extend(f)
+                dirs.append(root)
             elif os.path.isfile(root):
                 files.append(root)
 
+        while dirs:
+            try:
+                next_dir = dirs.pop(0)
+                for found in os.scandir(next_dir):
+                    # Ignoring symlinks prevents infinite loops with cyclic directory layouts
+                    if found.is_dir() and not found.is_symlink() and not self.is_filename_ignored(found.path, True):
+                        dirs.append(found.path)
+                    elif found.is_file() and not self.is_filename_ignored(found.path, False):
+                        files.append(found.path)
+            except (OSError, FileNotFoundError):
+                pass # Permissions issue. Not much we can do
         return files
 
     def open_all(self):

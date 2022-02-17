@@ -33,7 +33,7 @@ end;
 
 
 procedure TATSynEdit.DoCalcLineHilite(const AData: TATWrapItem;
-  out AParts: TATLineParts;
+  var AParts: TATLineParts;
   ACharsSkipped, ACharsMax: integer;
   AColorBG: TColor; AColorForced: boolean;
   var AColorAfter: TColor;
@@ -64,7 +64,7 @@ begin
         bEnableHilite:= false; //avoid normal highlighting for this line
         AParts[0].Len:= nLineLen;
         AParts[0].Offset:= 0;
-        AParts[0].ColorBG:= Colors.Markers;
+        AParts[0].ColorBG:= Colors.GitMarkerBG;
         AParts[0].ColorFont:= Colors.TextBG;
       end;
 

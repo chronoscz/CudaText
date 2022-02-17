@@ -125,8 +125,7 @@
   //                   On Windows, 'offsets' don't decrease rendering speed.
   //                   On macOS, 'offsets' decrease (2x) renderind speed.
   //                   On GTK2 and Qt5, 'offsets' decrease rendering speed.
-  //  if 'c' in value: Render the character over the inverted character cell.
-  //                   Otherwise, caret will show the inverted character cell, with inverted font color.
+  //  if 'c' in value: On painting caret, additionally render the text over inverted caret's cell.
   //  if 'e' in value: Ellipsis-char U+2026 has width 100%, otherwise the width from "unicode_full_width".
   //Note: this option is global, not per-lexer.
   "renderer_tweaks": "wo",
@@ -250,9 +249,11 @@
   //Shift text area to the right, so text will look "centered".
   //  If value=0: no shifting.
   //  If value>0, text area is shifted, so N first characters in lines look "centered".
+  //Note: don't set small value here, use rather big value like 80 or more.
   "centering_width": 0,
 
   //Same as "centering_width", but it's applied in the Distraction-Free mode.
+  //Note: don't set small value here, use rather big value like 80 or more.
   "centering_for_distraction_free": 0,
 
   //Zebra mode, ie additional coloring of N-th lines (N=2 by default).
@@ -298,6 +299,11 @@
 
   //Show tooltip when mouse hovers over [...] folded blocks.
   "fold_tooltip_show": false,
+
+  //Don't show folding +/- icon for too small folding ranges, when
+  //range height (in lines) is less/equal than the option value.
+  //Value=0: show for all ranges.
+  "fold_icon_min_range": 0,
 
   //[Text/Commands]
   //If no selection, "Copy to clipboard" will take entire line with caret.
@@ -361,7 +367,9 @@
   "max_line_len_for_accurate_width": 500,
 
   //[Lexers]
-  //Maximal line length, which is handled by pair-brackets finder.
+  //Maximal line length parsed, ie:
+  //a) It limits the parsing of huge lines by "lite" lexers.
+  //b) It limits the pair-brackets finder.
   "max_line_len_parsed": 4000,
 
   //[View/Gutter]
@@ -531,9 +539,10 @@
 
   //Unprinted symbols: What info to show for unprinted symbols. Option is string.
   //  if "s" in value: Show whitespace
-  //  if "x" in value: Whitespace only in selection (overrides "l" and "t")
-  //  if "l" in value: Whitespace only at begin/end of lines (overrides "t")
-  //  if "t" in value: Whitespace only at end of lines
+  //  if "x" in value: Whitespace only in selection (overrides "l", "t", "X")
+  //  if "X" in value: Whitespace also in selection (works together with "l", "t")
+  //  if "l" in value: Whitespace only leading+trailing, ie at begin/end of lines (overrides "t")
+  //  if "t" in value: Whitespace only trailing, ie at end of lines
   //  if "e" in value: Show end-of-lines marks
   //  if "d" in value: Detailed end-of-lines: "LF", "CRLF", "CR" (overrides ".")
   //  if "." in value: Instead of arrows at end-of-lines, show thick dots (overrides "p")
@@ -564,9 +573,8 @@
   //[Text/Wrap]
   //Long lines wrap mode.
   //  0: no wrap (fastest)
-  //  1: wrap at window edge (exact value changes on window resize)
-  //  2: wrap at "fixed margin"
-  //  3: wrap at minimum of "window edge" and "fixed margin"
+  //  1: wrap at window width (exact value changes on window resize)
+  //  2: wrap at minimum of window width and "fixed margin"
   "wrap_mode": 0,
 
   //For lines beginning with whitespace, show wrapped parts indented, like line itself.
@@ -612,7 +620,7 @@
 
   //[Text/Caret]
   //Allow to place caret after end-of-line (virtual caret position),
-  //and allow caret to go to previous line when Left is pressed at line start.
+  //and allow caret to go to previous line when Left-arrow is pressed at line start.
   "caret_after_end": false,
 
   //Caret blinking interval (in msec).
@@ -645,8 +653,8 @@
   //  1: left-bottom
   //  2: right-bottom
   //  3: right-top
-  //  4: carets column on left
-  //  5: carets column on right
+  //  4: carets column on the left
+  //  5: carets column on the right
   "caret_after_paste_column": 5,
 
   //Keep caret on visible screen area, on commands "Scroll line up/down".
@@ -720,6 +728,7 @@
   //[Ui]
   //UI scale factor in %, 70 to 500. [has suffix]
   //If value=0, then OS scaling is detected and used (currently only on Windows).
+  //Note: this option is global, not per-lexer.
   "ui_scale": 0,
   "ui_scale__linux": 0,
   "ui_scale__mac": 0,
@@ -727,6 +736,7 @@
   //All fonts scale factor in %, 70 to 500. [has suffix]
   //If value=0, it follows the option "ui_scale".
   //Note: don't set 0 for Windows, it causes too big fonts with High-DPI.
+  //Note: this option is global, not per-lexer.
   "ui_scale_font": 100,
   "ui_scale_font__linux": 100,
   "ui_scale_font__mac": 100,
@@ -1018,13 +1028,14 @@
   //Note: this option is global, not per-lexer.
   "mouse_scroll_speed_vert": 1,
 
-  //Call "Go to definition" command, by click with modifier key.
+  //How to call "Go to definition" command, by click with what modifier key(s).
   //  "": disabled
-  //  "a": by Alt+click
-  //  "sa": by Shift+Alt+click
+  //  "a": by Alt+click; note: it may not work on Linux
+  //  "c": by Ctrl+click; if active, use Ctrl+[wheel click] to add caret
   //  "ca": by Ctrl+Alt+click
+  //  "sa": by Shift+Alt+click
   //  "sca": by Shift+Ctrl+Alt+click
-  "mouse_goto_definition": "a",
+  "mouse_goto_definition": "ca",
 
   //Mouse click on line number: select line with end-of-line
   //(so caret is placed on the next line).
@@ -1079,22 +1090,26 @@
   //when Down key is pressed on last line - jump to the very ending.
   "key_up_down_allow_edge": false,
 
-  //Keys Left/Right: with "caret_after_end":false, option allows carets
+  //Keys Left/Right-arrows: with "caret_after_end":false, option allows carets
   //(when at least 2 carets exist) go to next/previous line.
-  //(a: caret is at the line start and Left pressed,
-  //b: caret is at the line end and Right pressed.)
+  //(a: caret is at the line start and Left-arrow pressed,
+  //b: caret is at the line end and Right-arrow pressed.)
   "key_left_right_wrap_with_carets": true,
 
-  //Keys Left/Right: try to jump to opposite selection edge.
+  //Keys Left/Right-arrows: try to jump to opposite selection edge.
   "key_left_right_swap_sel": true,
 
-  //Keys Left/Right: try to jump to opposite selection edge, and keep this selection.
+  //Keys Left/Right-arrows: try to jump to opposite selection edge, and keep this selection.
   "key_left_right_swap_sel_and_select": false,
 
   //[Ui/Statusbar]
-  //States: no-selection, small-selection (one line), stream-selection (several lines),
-  //column-selection, multi-carets.
-  //Macros:
+  //CudaText has several options for different kinds of selections. Possible kinds:
+  //  - no selection
+  //  - small selection (1 caret, selection is part of a single line)
+  //  - stream selection (1 caret, selection includes parts of 2+ lines)
+  //  - column selection (used for option "carets_primitive_column_sel":false)
+  //  - multi-carets
+  //Macros allowed in options values:
   //  {y}: line index of first caret
   //  {y2}: line index of last caret
   //  {yb}: line index of first selection beginning
@@ -1125,8 +1140,9 @@
   //Statusbar is visible.
   "ui_statusbar_show": true,
 
-  //Statusbar panels list. Can skip items, can reorder items.
-  //Allowed panel names:
+  //Statusbar panels list. Can skip and reorder panels.
+  //Panels are "|"-separated, where each item is ","-separated: name, alignment, width.
+  //Panel names:
   //    caret  : Caret(s) info.
   //    enc    : Encoding name.
   //    ends   : Line ends characters.
@@ -1140,8 +1156,11 @@
   //             Change zoom value by Command Palette commands "current document font size: bigger/smaller",
   //             and by Ctrl+<Mouse wheel> (when option "mouse_wheel_zoom":true).
   //    msg    : Messages from CudaText and plugins. Panel should be auto-sized.
-  //Allowed panel alignments:
-  //    C (center), L (left), R (right), A (auto-size).
+  //Panel alignments:
+  //    C: center
+  //    L: left
+  //    R: right
+  //    A: auto-sized (size adjusts to text)
   "ui_statusbar_panels": "caret,C,180|enc,C,125|ends,A,45|lexer,C,140|tabsize,A,75|selmode,A,15|msg,L,4000",
 
   //Statusbar messages: show time in seconds.
@@ -1334,16 +1353,18 @@
   "auto_fold_comments": 0,
 
   //[File]
-  //Extensions of picture files (they show as pictures)
+  //Extensions of files, which CudaText tries to load as pictures.
+  //Formats BMP/PNG/JPEG/GIF/ICO are supported by Free Pascal.
+  //Formats WEBP/PSD/TIFF/TGA/CUR/SVG/PCX are supported by BGRABitmap library.
   //Note: this option is global, not per-lexer.
-  "picture_types": "bmp,png,jpg,jpeg,jpe,gif,ico",
+  "picture_types": "bmp,png,jpg,jpeg,jpe,gif,ico,webp,psd,tga,cur",
 
   //[View/Web]
   //Highlight+underline links (URL and emails).
   "links_hilite": true,
 
   //Regular expression, which finds links.
-  "links_regex": "\\b(mailto:)?\\w[\\w\\-\\.]*@\\w[\\w\\-\\.]*\\.\\w{2,}\\b|\\b(https?://|ftp://|magnet:\\?|www\\.|ftp\\.)\\w[\\w\\-\\.@]*(:\\d+)?(/[~\\w\\.\\-\\+\\/%]*)?(\\?[^<>'\"\\s]+)?(\\#[\\w\\-]*)?",
+  "links_regex": "\\b(mailto:)?\\w[\\w\\-\\.]*@\\w[\\w\\-\\.]*\\.\\w{2,}\\b|\\b(https?://|ftp://|magnet:\\?|www\\.|ftp\\.)\\w[\\w\\-\\.@]*(:\\d+)?(/[~\\w\\.,\\-\\+\\/%]*)?(\\?[^<>'\"\\s]+)?(\\#[\\w\\-]*)?",
 
   //[File]
   //Maximal file size, allowed to open, in Mb.
@@ -1359,11 +1380,11 @@
   //Value is string of few chars:
   //  if "t" in value: toolbar
   //  if "i" in value: statusbar
-  //  if "a" in value: sidebar (on the left edge)
-  //  if "p" in value: side panels (near sidebar, e.g. Code Tree, Projects)
-  //  if "b" in value: bottom panels (e.g. Console)
+  //  if "a" in value: sidebar (usually on the left side)
+  //  if "p" in value: side panels near the sidebar (Code-Tree, Projects etc)
+  //  if "b" in value: bottom panels (Console, Output etc)
   //  if "u" in value: file tabs
-  //  if "g" in value: gutter (all columns: numbers, bookmarks...)
+  //  if "g" in value: gutter (all columns: numbers, bookmarks etc)
   "ui_fullscreen": "tp",
 
   //Highlight border of focused input box.
@@ -1377,7 +1398,7 @@
   "ui_console_wrap": true,
 
   //[Ui/Panels]
-  //Show sidebar (vertical bar with buttons on the left side).
+  //Show sidebar (vertical bar with buttons, usually on the left side).
   "ui_sidebar_show": true,
 
   //Place sidebar on the right side.

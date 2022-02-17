@@ -12,13 +12,12 @@
 
 unit ec_syntax_format;
 
-{$mode Delphi}{$H+}
+{$mode delphi}
 
 interface
 
 uses
   Classes, SysUtils, Graphics,
-  ec_syntax_item,
   ec_syntax_collection;
 
 type

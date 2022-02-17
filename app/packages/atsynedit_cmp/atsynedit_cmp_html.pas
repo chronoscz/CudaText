@@ -443,7 +443,10 @@ begin
           Result:= ctxValueVideoSrc
         else
         if (ATagName='source') and (AAttrName='src') then
-          Result:= ctxValueSourceSrc;
+          Result:= ctxValueSourceSrc
+        else
+        if (ATagName='source') and (AAttrName='srcset') then
+          Result:= ctxValueImageSrc;
       end
       else
         Result:= ctxValues;
@@ -548,7 +551,7 @@ procedure TAcp.DoOnGetCompleteProp(Sender: TObject;
       CompletionOpsHtml.PrefixDir,
       CompletionOpsHtml.PrefixFile,
       bAddSlash,
-      false
+      true //URL encode
       );
   end;
   //
@@ -850,7 +853,7 @@ begin
   Ed.DoEventChange(Ed.Carets[0].PosY);
   Ed.Update(true);
 
-  SetLength(NeedBracketX, 0);
+  NeedBracketX:= nil;
 end;
 
 
@@ -993,7 +996,7 @@ initialization
     FilenameHtmlEntities:= '';
     FileMaskHREF:= AllFilesMask;
     FileMaskLinkHREF:= '*.css';
-    FileMaskPictures:= '*.png;*.gif;*.jpg;*.jpeg;*.ico';
+    FileMaskPictures:= '*.png;*.gif;*.jpg;*.jpeg;*.ico;*.webp;*.avif';
     FileMaskScript:= '*.js';
     FileMaskFrame:= '*.htm;*.html;*.php*;*.asp;*.aspx';
     FileMaskAudio:= '*.mp3;*.ogg;*.wav';

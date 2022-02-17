@@ -177,7 +177,7 @@ begin
     begin
       SepCli.Init(Copy(SParam, 4, MaxInt), '#');
       SepCli.GetItemStr(CliModule);
-      SetLength(CliParams, 0);
+      CliParams:= nil;
       while SepCli.GetItemStr(sCli) do
       begin
         SetLength(CliParams, Length(CliParams)+1);
@@ -226,11 +226,15 @@ begin
     //if folder, open it in ProjManager
     if DirectoryExistsUTF8(SParam) then
     begin
+      Application.ProcessMessages; //fix issue #3928
+
       DoFolderOpen(SParam, False, cInvokeAppInternal);
     end
     else
     if FileExists(SParam) then
     begin
+      Application.ProcessMessages; //fix issue #3928
+
       Frame:= DoFileOpen(SParam, '', nil, AOpenOptions);
       if Assigned(Frame) then
       begin
@@ -297,7 +301,7 @@ var
 begin
   if not IsAllowedToOpenFileNow then Exit;
 
-  SetLength(Params, 0);
+  Params:= nil;
   S:= '';
 
   Sep.Init(UTF8Encode(TEncoding.UTF8.GetString(Msg)), '|');

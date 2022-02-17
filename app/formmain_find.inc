@@ -401,6 +401,7 @@ begin
     fmFind.OnGetMainEditor:= @FindDialogGetMainEditor;
     fmFind.OnGetToken:= @FinderOnGetToken;
     fmFind.OnShowMatchesCount:= @FinderShowMatchesCount;
+    fmFind.OnHandleKeyDown:= @FinderHandleKeyDown;
     fmFind.Color:= GetAppColor(apclTabBg);
     fmFind.UpdateInitialCaretPos;
 
@@ -471,54 +472,51 @@ begin
   //MsgLogDebug('find dlg: init');
   InitFormFind;
 
-  with fmFind do
+  if StrSel='' then
   begin
-    if StrSel='' then
-    begin
-      fmFind.chkInSel.Checked:= false;
-      FFinder.OptInSelection:= false;
-    end;
-
-    //change Find field only if options SuggestSel/SuggestWord on,
-    //else dont touch Find field
-    if UiOps.FindSuggestSel and (StrSel<>'') then
-    begin
-      if not FFinder.OptInSelection then
-        StrSuggested:= StrSel;
-    end
-    else
-    if UiOps.FindSuggestWord and (StrWord<>'') then
-      StrSuggested:= StrWord;
-
-    MsgLogDebug('find dlg: select all in input');
-    edFind.DoCommand(cCommand_SelectAll, cInvokeAppInternal);
-    edRep.DoCommand(cCommand_SelectAll, cInvokeAppInternal);
-
-    chkCase.Checked:= FFinder.OptCase;
-    chkWords.Checked:= FFinder.OptWords;
-    chkRegex.Checked:= FFinder.OptRegex;
-    chkConfirm.Checked:= FFinder.OptConfirmReplace;
-    chkWrap.Checked:= FFinder.OptWrapped;
-    bTokens.ItemIndex:= Ord(FFinder.OptTokens);
-
-    if UiOps.FindSuggestInSelection and bMultiLineSel then
-    begin
-      chkInSel.Checked:= true;
-      StrSuggested:= '';
-    end
-    else
-      chkInSel.Checked:= FFinder.OptInSelection;
-
-    UpdateInitialCaretPos;
-    UpdateInputFind(StrSuggested);
-    IsReplace:= AReplaceMode;
-
-    //MsgLogDebug('find dlg: update state');
-    UpdateState(true);
-    //MsgLogDebug('find dlg: show');
-    Show;
-    //MsgLogDebug('find dlg: focus');
+    fmFind.chkInSel.Checked:= false;
+    FFinder.OptInSelection:= false;
   end;
+
+  //change Find field only if options SuggestSel/SuggestWord on,
+  //else dont touch Find field
+  if UiOps.FindSuggestSel and (StrSel<>'') then
+  begin
+    if not FFinder.OptInSelection then
+      StrSuggested:= StrSel;
+  end
+  else
+  if UiOps.FindSuggestWord and (StrWord<>'') then
+    StrSuggested:= StrWord;
+
+  //MsgLogDebug('find dlg: select all in input');
+  fmFind.edFind.DoCommand(cCommand_SelectAll, cInvokeAppInternal);
+  fmFind.edRep.DoCommand(cCommand_SelectAll, cInvokeAppInternal);
+
+  fmFind.chkCase.Checked:= FFinder.OptCase;
+  fmFind.chkWords.Checked:= FFinder.OptWords;
+  fmFind.chkRegex.Checked:= FFinder.OptRegex;
+  fmFind.chkConfirm.Checked:= FFinder.OptConfirmReplace;
+  fmFind.chkWrap.Checked:= FFinder.OptWrapped;
+  fmFind.bTokens.ItemIndex:= Ord(FFinder.OptTokens);
+
+  if UiOps.FindSuggestInSelection and bMultiLineSel then
+  begin
+    fmFind.chkInSel.Checked:= true;
+    StrSuggested:= '';
+  end
+  else
+    fmFind.chkInSel.Checked:= FFinder.OptInSelection;
+
+  fmFind.UpdateInitialCaretPos;
+  fmFind.UpdateInputFind(StrSuggested);
+  fmFind.IsReplace:= AReplaceMode;
+
+  //MsgLogDebug('find dlg: update state');
+  fmFind.UpdateState(true);
+  //MsgLogDebug('find dlg: show');
+  fmFind.Show;
+  //MsgLogDebug('find dlg: focus');
 
   UpdateFindDialogEnabled(Frame);
   if fmFind.Enabled then
@@ -546,6 +544,20 @@ begin
     fmFind.UpdateState(false);
 end;
 
+procedure TfmMain.UpdateFindDialogOnTabFocusing(F: TEditorFrame);
+//apply "Highlight all matches" on focusing new tab
+begin
+  if Assigned(fmFind) and fmFind.Visible then
+  begin
+    if Assigned(F) then
+      UpdateFindDialogEnabled(F);
+
+    if fmFind.Enabled then
+      fmFind.UpdateState(false); //if 'true', we have issue #3244
+                                 //if 'true', also the 'select-all' result is reset on focusing editor
+  end;
+end;
+
 procedure TfmMain.DoDialogFind_Hide;
 var
   Frame: TEditorFrame;
@@ -561,6 +573,50 @@ begin
 
     fmFind.Hide;
     UpdateAppForSearch(false, false, true, true);
+  end;
+end;
+
+
+procedure TfmMain.DoDialogFind_Toggle(AReplaceMode, AAndFocus: boolean);
+var
+  Frame: TEditorFrame;
+  bFocusedBottom: boolean;
+begin
+  bFocusedBottom:= IsFocusedFind;
+  InitFormFind;
+
+  if fmFind.Visible then
+  begin
+    if fmFind.IsReplace<>AReplaceMode then
+      fmFind.IsReplace:= AReplaceMode
+    else
+      fmFind.Hide;
+  end
+  else
+  begin
+    fmFind.IsReplace:= AReplaceMode;
+    fmFind.Show;
+  end;
+
+  if fmFind.Visible then
+  begin
+    if AAndFocus then
+    begin
+      {$ifndef windows}
+      //fix focusing Find-dlg when command is called from cmd-palette
+      Application.ProcessMessages;
+      {$endif}
+      fmFind.UpdateFocus(not AReplaceMode);
+    end;
+  end
+  else
+  begin
+    if bFocusedBottom then
+    begin
+      Frame:= CurrentFrame;
+      if Assigned(Frame) then
+        Frame.SetFocus;
+    end;
   end;
 end;
 
@@ -822,7 +878,6 @@ procedure TfmMain.FinderOnConfirmReplace_API(Sender: TObject; APos1,
   var AReplacement: UnicodeString);
 var
   ThisFinder: TATEditorFinder;
-  Params: TAppVariantArray;
   Callback: string;
   EventRes: TAppPyEventResult;
   Ed: TATSynEdit;
@@ -839,14 +894,14 @@ begin
   Ed.DoShowPos(APos1, ThisFinder.IndentHorz, ThisFinder.IndentVert, true, false, true);
   Ed.Update(true);
 
-  SetLength(Params, 5);
-  Params[0]:= AppVariant(APos1.X);
-  Params[1]:= AppVariant(APos1.Y);
-  Params[2]:= AppVariant(APos2.X);
-  Params[3]:= AppVariant(APos2.Y);
-  Params[4]:= AppVariant(AReplacement);
-
-  EventRes:= DoPyCallbackFromAPI_2(Callback, Ed, Params);
+  EventRes:= DoPyCallbackFromAPI_2(Callback, Ed,
+    [
+    AppVariant(APos1.X),
+    AppVariant(APos1.Y),
+    AppVariant(APos2.X),
+    AppVariant(APos2.Y),
+    AppVariant(AReplacement)
+    ]);
 
   case EventRes.Val of
     evrInt:
@@ -1334,5 +1389,24 @@ end;
 procedure TfmMain.FindDialogFocusEditor(Sender: TObject);
 begin
   DoFocusEditor(CurrentEditor);
+end;
+
+function TfmMain.FinderHandleKeyDown(AKey: word; AShiftState: TShiftState): boolean;
+var
+  Ed: TATSynEdit;
+  NCmd: integer;
+  KeyHistory: TATKeyArray;
+begin
+  Result:= false;
+  Ed:= CurrentEditor;
+  if Ed=nil then exit;
+
+  FillChar(KeyHistory{%H-}, SizeOf(KeyHistory), 0);
+  NCmd:= Ed.Keymap.GetCommandFromShortcut(ShortCut(AKey, AShiftState), KeyHistory);
+  if IsCommandHandledFromFindDialog(NCmd) then
+  begin
+    Ed.DoCommand(NCmd, cInvokeHotkey);
+    Result:= true;
+  end;
 end;
 

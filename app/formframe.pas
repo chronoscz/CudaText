@@ -20,6 +20,7 @@ uses
   ATGroups,
   ATScrollBar,
   ATSynEdit,
+  ATSynEdit_Options,
   ATSynEdit_Finder,
   ATSynEdit_Keymap_Init,
   ATSynEdit_Adapters,
@@ -145,7 +146,7 @@ type
     FOnEditorCommand: TATSynEditCommandEvent;
     FOnEditorChangeCaretPos: TNotifyEvent;
     FOnEditorScroll: TNotifyEvent;
-    FOnSaveFile: TNotifyEvent;
+    FOnSaveFile: TEditorFrameStringEvent;
     FOnAddRecent: TNotifyEvent;
     FOnPyEvent: TEditorFramePyEvent;
     FOnInitAdapter: TNotifyEvent;
@@ -164,8 +165,8 @@ type
     FImageBox: TATImageBox;
     FBin: TATBinHex;
     FBinStream: TFileStream;
-    FCheckFilenameOpened: TStrFunction;
-    FOnMsgStatus: TStrEvent;
+    FCheckFilenameOpened: TAppStringFunction;
+    FOnMsgStatus: TAppStringEvent;
     FSaveDialog: TSaveDialog;
     FWasVisible: boolean;
     FInitialLexer1: TecSyntAnalyzer;
@@ -174,6 +175,7 @@ type
     FEditorsLinked: boolean;
     FCachedTreeview: array[0..1] of TTreeView;
     FLexerChooseFunc: TecLexerChooseFunc;
+    FLexerNameBackup: string;
     FBracketHilite: boolean;
     FBracketHiliteUserChanged: boolean;
     FBracketSymbols: string;
@@ -310,12 +312,13 @@ type
     FileProps: TAppFileProps;
     FileProps2: TAppFileProps;
     MacroStrings: TStringList;
+    VersionInSession: Int64;
 
     constructor Create(AOwner: TComponent; AApplyCentering: boolean); reintroduce;
     destructor Destroy; override;
     function Editor: TATSynEdit;
     function EditorBro: TATSynEdit;
-    function Modified: boolean;
+    function Modified(ACheckOnSessionClosing: boolean=false): boolean;
     property Adapter[Ed: TATSynEdit]: TATAdapterEControl read GetAdapter;
     procedure EditorOnKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure DoShow;
@@ -355,6 +358,9 @@ type
     property LexerLite[Ed: TATSynEdit]: TATLiteLexer read GetLexerLite write SetLexerLite;
     property LexerName[Ed: TATSynEdit]: string read GetLexerName write SetLexerName;
     property LexerInitial[Ed: TATSynEdit]: TecSyntAnalyzer read GetInitialLexer write SetInitialLexer;
+
+    procedure LexerBackupSave;
+    procedure LexerBackupRestore;
 
     property Locked: boolean read FLocked write SetLocked;
     property CommentString[Ed: TATSynEdit]: string read GetCommentString;
@@ -441,8 +447,8 @@ type
     //events
     property OnGetSaveDialog: TFrameGetSaveDialog read FOnGetSaveDialog write FOnGetSaveDialog;
     property OnProgress: TATFinderProgress read FOnProgress write FOnProgress;
-    property OnCheckFilenameOpened: TStrFunction read FCheckFilenameOpened write FCheckFilenameOpened;
-    property OnMsgStatus: TStrEvent read FOnMsgStatus write FOnMsgStatus;
+    property OnCheckFilenameOpened: TAppStringFunction read FCheckFilenameOpened write FCheckFilenameOpened;
+    property OnMsgStatus: TAppStringEvent read FOnMsgStatus write FOnMsgStatus;
     property OnFocusEditor: TNotifyEvent read FOnFocusEditor write FOnFocusEditor;
     property OnChangeCaption: TNotifyEvent read FOnChangeCaption write FOnChangeCaption;
     property OnChangeSlow: TNotifyEvent read FOnChangeSlow write FOnChangeSlow;
@@ -452,7 +458,7 @@ type
     property OnEditorCommand: TATSynEditCommandEvent read FOnEditorCommand write FOnEditorCommand;
     property OnEditorChangeCaretPos: TNotifyEvent read FOnEditorChangeCaretPos write FOnEditorChangeCaretPos;
     property OnEditorScroll: TNotifyEvent read FOnEditorScroll write FOnEditorScroll;
-    property OnSaveFile: TNotifyEvent read FOnSaveFile write FOnSaveFile;
+    property OnSaveFile: TEditorFrameStringEvent read FOnSaveFile write FOnSaveFile;
     property OnAddRecent: TNotifyEvent read FOnAddRecent write FOnAddRecent;
     property OnPyEvent: TEditorFramePyEvent read FOnPyEvent write FOnPyEvent;
     property OnInitAdapter: TNotifyEvent read FOnInitAdapter write FOnInitAdapter;
@@ -513,7 +519,7 @@ var
 begin
   S:= '"Options Editor" provides the dialog - click here to open';
 
-  fn:= GetAppLangFilename;
+  fn:= AppFile_Language;
   if FileExists(fn) then
   begin
     ini:= TIniFile.Create(fn);
@@ -546,7 +552,7 @@ procedure UpdateTabPreviewStyle(D: TATTabData; AValue: boolean);
 begin
   D.TabSpecial:= AValue;
   if AValue then
-    D.TabFontStyle:= StringToFontStyles(UiOps.TabPreviewFontStyle)
+    D.TabFontStyle:= Lexer_StringToFontStyles(UiOps.TabPreviewFontStyle)
   else
     D.TabFontStyle:= [];
 end;
@@ -628,7 +634,6 @@ procedure TEditorFrame.EditorOnClick(Sender: TObject);
 var
   Ed: TATSynEdit;
   StateString: string;
-  Params: TAppVariantArray;
 begin
   Ed:= Sender as TATSynEdit;
 
@@ -638,17 +643,14 @@ begin
   if Ed.Markers.DeleteWithTag(UiOps.FindOccur_TagValue) then
     Ed.Update;
 
-  if UiOps.MouseGotoDefinition<>'' then
-    if StateString=UiOps.MouseGotoDefinition then
+  if EditorOps.OpMouseGotoDefinition<>'' then
+    if StateString=EditorOps.OpMouseGotoDefinition then
     begin
-      SetLength(Params, 0);
-      DoPyEvent(Ed, cEventOnGotoDef, Params);
+      DoPyEvent(Ed, cEventOnGotoDef, []);
       exit;
     end;
 
-  SetLength(Params, 1);
-  Params[0]:= AppVariant(StateString);
-  DoPyEvent(Ed, cEventOnClick, Params);
+  DoPyEvent(Ed, cEventOnClick, [AppVariant(StateString)]);
 end;
 
 function TEditorFrame.GetSplitPosCurrent: double;
@@ -669,15 +671,14 @@ end;
 
 procedure TEditorFrame.EditorOnKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 var
-  Params: TAppVariantArray;
   Res: TAppPyEventResult;
 begin
-  SetLength(Params, 2);
-  Params[0]:= AppVariant(Key);
-  Params[1]:= AppVariant(ConvertShiftStateToString(Shift));
-
   //result=False: block the key
-  Res:= DoPyEvent(Sender as TATSynEdit, cEventOnKey, Params);
+  Res:= DoPyEvent(Sender as TATSynEdit, cEventOnKey,
+    [
+    AppVariant(Key),
+    AppVariant(ConvertShiftStateToString(Shift))
+    ]);
   if Res.Val=evrFalse then
   begin
     Key:= 0;
@@ -686,13 +687,7 @@ begin
 end;
 
 procedure TEditorFrame.EditorOnKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
-var
-  Params: TAppVariantArray;
 begin
-  SetLength(Params, 2);
-  Params[0]:= AppVariant(Key);
-  Params[1]:= AppVariant(ConvertShiftStateToString(Shift));
-
   //fire on_key_up only for keys Ctrl, Alt, Shift
   //event result is ignored
   case Key of
@@ -700,32 +695,31 @@ begin
     VK_MENU,
     VK_SHIFT,
     VK_RSHIFT:
-      DoPyEvent(Sender as TATSynEdit, cEventOnKeyUp, Params);
+      DoPyEvent(Sender as TATSynEdit, cEventOnKeyUp,
+        [
+        AppVariant(Key),
+        AppVariant(ConvertShiftStateToString(Shift))
+        ]);
   end;
 end;
 
 procedure TEditorFrame.EditorOnPaste(Sender: TObject; var AHandled: boolean;
   AKeepCaret, ASelectThen: boolean);
-var
-  Params: TAppVariantArray;
 begin
-  SetLength(Params, 2);
-  Params[0]:= AppVariant(AKeepCaret);
-  Params[1]:= AppVariant(ASelectThen);
-
-  if DoPyEvent(Sender as TATSynEdit, cEventOnPaste, Params).Val = evrFalse then
+  if DoPyEvent(Sender as TATSynEdit, cEventOnPaste,
+    [
+    AppVariant(AKeepCaret),
+    AppVariant(ASelectThen)
+    ]).Val = evrFalse then
     AHandled:= true;
 end;
 
 procedure TEditorFrame.EditorOnScroll(Sender: TObject);
-var
-  Params: TAppVariantArray;
 begin
   if Assigned(FOnEditorScroll) then
     FOnEditorScroll(Sender);
 
-  SetLength(Params, 0);
-  DoPyEvent(Sender as TATSynEdit, cEventOnScroll, Params);
+  DoPyEvent(Sender as TATSynEdit, cEventOnScroll, []);
 end;
 
 function TEditorFrame.GetTabPages: TATPages;
@@ -820,9 +814,10 @@ const
   cMaxSelectedLinesForAutoCopy = 200;
 {$endif}
 var
-  Params: TAppVariantArray;
   Ed: TATSynEdit;
 begin
+  if AppSessionIsLoading or AppSessionIsClosing then exit;
+
   Ed:= Sender as TATSynEdit;
   if Assigned(FOnEditorChangeCaretPos) then
     FOnEditorChangeCaretPos(Sender);
@@ -841,30 +836,25 @@ begin
   EditorCopySelToPrimarySelection(Ed, cMaxSelectedLinesForAutoCopy);
   {$endif}
 
-  SetLength(Params, 0);
-  DoPyEvent(Ed, cEventOnCaret, Params);
+  DoPyEvent(Ed, cEventOnCaret, []);
 end;
 
 procedure TEditorFrame.EditorOnHotspotEnter(Sender: TObject; AHotspotIndex: integer);
-var
-  Params: TAppVariantArray;
 begin
-  SetLength(Params, 2);
-  Params[0]:= AppVariant(true); //hotspot enter
-  Params[1]:= AppVariant(AHotspotIndex);
-
-  DoPyEvent(Sender as TATSynEdit, cEventOnHotspot, Params);
+  DoPyEvent(Sender as TATSynEdit, cEventOnHotspot,
+    [
+    AppVariant(true), //hotspot enter
+    AppVariant(AHotspotIndex)
+    ]);
 end;
 
 procedure TEditorFrame.EditorOnHotspotExit(Sender: TObject; AHotspotIndex: integer);
-var
-  Params: TAppVariantArray;
 begin
-  SetLength(Params, 2);
-  Params[0]:= AppVariant(false); //hotspot exit
-  Params[1]:= AppVariant(AHotspotIndex);
-
-  DoPyEvent(Sender as TATSynEdit, cEventOnHotspot, Params);
+  DoPyEvent(Sender as TATSynEdit, cEventOnHotspot,
+    [
+    AppVariant(false), //hotspot exit
+    AppVariant(AHotspotIndex)
+    ]);
 end;
 
 function _ContrastColor(AColor: TColor): TColor;
@@ -935,7 +925,7 @@ begin
           if IsCharHexDigit(AStr[i+1]) then
           begin
             //don't allow word-char before
-            if (i>1) and IsCharWord(AStr[i-1], cDefaultNonWordChars) then Continue;
+            if (i>1) and IsCharWord(AStr[i-1], ATEditorOptions.DefaultNonWordChars) then Continue;
 
             NColor:= TATHtmlColorParserW.ParseTokenRGB(@AStr[i+1], NLen, clNone);
             Inc(NLen);
@@ -949,7 +939,7 @@ begin
           then
           begin
             //don't allow word-char before
-            if (i>1) and IsCharWord(AStr[i-1], cDefaultNonWordChars) then Continue;
+            if (i>1) and IsCharWord(AStr[i-1], ATEditorOptions.DefaultNonWordChars) then Continue;
 
             NColor:= TATHtmlColorParserW.ParseFunctionRGB(AStr, i, NLen);
             bFoundBrackets:= true;
@@ -963,7 +953,7 @@ begin
           then
           begin
             //don't allow word-char before
-            if (i>1) and IsCharWord(AStr[i-1], cDefaultNonWordChars) then Continue;
+            if (i>1) and IsCharWord(AStr[i-1], ATEditorOptions.DefaultNonWordChars) then Continue;
 
             NColor:= TATHtmlColorParserW.ParseFunctionHSL(AStr, i, NLen);
             bFoundBrackets:= true;
@@ -1356,7 +1346,6 @@ end;
 procedure TEditorFrame.EditorOnChange(Sender: TObject);
 var
   Ed, EdOther: TATSynEdit;
-  Params: TAppVariantArray;
   b1, b2: boolean;
 begin
   Ed:= Sender as TATSynEdit;
@@ -1381,8 +1370,7 @@ begin
     EdOther.Update(true);
   end;
 
-  SetLength(Params, 0);
-  DoPyEvent(Ed, cEventOnChange, Params);
+  DoPyEvent(Ed, cEventOnChange, []);
 
   TimerChange.Enabled:= false;
   TimerChange.Interval:= UiOps.PyChangeSlow;
@@ -1437,7 +1425,6 @@ end;
 
 procedure TEditorFrame.EditorOnEnter(Sender: TObject);
 var
-  Params: TAppVariantArray;
   IsEd2: boolean;
 begin
   IsEd2:= Sender=Ed2;
@@ -1450,8 +1437,7 @@ begin
   if Assigned(FOnFocusEditor) then
     FOnFocusEditor(Sender);
 
-  SetLength(Params, 0);
-  DoPyEvent(Sender as TATSynEdit, cEventOnFocus, Params);
+  DoPyEvent(Sender as TATSynEdit, cEventOnFocus, []);
 
   FActivationTime:= GetTickCount64;
 end;
@@ -1610,9 +1596,9 @@ begin
       begin
         if ACommand=cCommand_ZoomReset then
         begin
-          NValue:= EditorScaleFontPercents;
+          NValue:= ATEditorScaleFontPercents;
           if NValue=0 then
-            NValue:= EditorScalePercents;
+            NValue:= ATEditorScalePercents;
         end
         else
           NValue:= Ed.OptScaleFont;
@@ -1664,27 +1650,25 @@ end;
 
 procedure TEditorFrame.EditorOnClickDouble(Sender: TObject; var AHandled: boolean);
 var
-  Params: TAppVariantArray;
   Res: TAppPyEventResult;
 begin
-  SetLength(Params, 1);
-  Params[0]:= AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState));
-
-  Res:= DoPyEvent(Sender as TATSynEdit, cEventOnClickDbl, Params);
+  Res:= DoPyEvent(Sender as TATSynEdit, cEventOnClickDbl,
+    [
+    AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState))
+    ]);
   AHandled:= Res.Val=evrFalse;
 end;
 
 procedure TEditorFrame.EditorOnClickLink(Sender: TObject; const ALink: string);
 var
-  Params: TAppVariantArray;
   Res: TAppPyEventResult;
   bHandled: boolean;
 begin
-  SetLength(Params, 2);
-  Params[0]:= AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState));
-  Params[1]:= AppVariant(ALink);
-
-  Res:= DoPyEvent(Sender as TATSynEdit, cEventOnClickLink, Params);
+  Res:= DoPyEvent(Sender as TATSynEdit, cEventOnClickLink,
+    [
+    AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState)),
+    AppVariant(ALink)
+    ]);
   bHandled:= Res.Val=evrFalse;
   if not bHandled then
     if Assigned(FOnAppClickLink) then
@@ -1710,7 +1694,6 @@ end;
 procedure TEditorFrame.EditorOnClickGap(Sender: TObject;
   AGapItem: TATGapItem; APos: TPoint);
 var
-  Params: TAppVariantArray;
   Ed: TATSynEdit;
   W, H: integer;
 begin
@@ -1728,16 +1711,16 @@ begin
     H:= 0;
   end;
 
-  SetLength(Params, 7);
-  Params[0]:= AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState));
-  Params[1]:= AppVariant(AGapItem.LineIndex);
-  Params[2]:= AppVariant(AGapItem.Tag);
-  Params[3]:= AppVariant(W);
-  Params[4]:= AppVariant(H);
-  Params[5]:= AppVariant(APos.X);
-  Params[6]:= AppVariant(APos.Y);
-
-  DoPyEvent(Ed, cEventOnClickGap, Params);
+  DoPyEvent(Ed, cEventOnClickGap,
+    [
+    AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState)),
+    AppVariant(AGapItem.LineIndex),
+    AppVariant(AGapItem.Tag),
+    AppVariant(W),
+    AppVariant(H),
+    AppVariant(APos.X),
+    AppVariant(APos.Y)
+    ]);
 end;
 
 
@@ -1752,7 +1735,7 @@ end;
 procedure TEditorFrame.InitEditor(var ed: TATSynEdit; const AName: string);
 begin
   ed:= TATSynEdit.Create(FFormDummy);
-  ed.CudatextFrame:= Self;
+  ed.ParentFrameObject:= Self;
   ed.Name:= AName;
   ed.Parent:= FFormDummy;
   DoControl_InitPropsObject(ed, FFormDummy, 'editor');
@@ -1905,8 +1888,6 @@ begin
 end;
 
 destructor TEditorFrame.Destroy;
-var
-  Params: TAppVariantArray;
 begin
   if Assigned(FBin) then
   begin
@@ -1935,10 +1916,7 @@ begin
   end;
 
   if not Application.Terminated then //prevent crash on exit
-  begin
-    SetLength(Params, 0);
-    DoPyEvent(Ed1, cEventOnClose, Params);
-  end;
+    DoPyEvent(Ed1, cEventOnClose, []);
 
   FreeAndNil(MacroStrings);
   FreeAndNil(FCodetreeFilterHistory);
@@ -2012,7 +1990,7 @@ end;
 procedure TEditorFrame.ApplyThemeToInfoPanel(APanel: TPanel);
 begin
   APanel.Font.Name:= UiOps.VarFontName;
-  APanel.Font.Size:= AppScaleFont(UiOps.VarFontSize);
+  APanel.Font.Size:= ATEditorScaleFont(UiOps.VarFontSize);
   APanel.Color:= GetAppColor(apclListBg);
   APanel.Font.Color:= GetAppColor(apclListFont);
 end;
@@ -2055,7 +2033,6 @@ procedure TEditorFrame.SetLexer(Ed: TATSynEdit; an: TecSyntAnalyzer);
 var
   an2: TecSyntAnalyzer;
   Ada: TATAdapterEControl;
-  Params: TAppVariantArray;
 begin
   {
   //it breaks code-tree, issue #3348
@@ -2144,8 +2121,7 @@ begin
   begin
     LexerInitial[Ed]:= an;
     //support on_lexer
-    SetLength(Params, 0);
-    DoPyEvent(Ed, cEventOnLexer, Params);
+    DoPyEvent(Ed, cEventOnLexer, []);
   end;
 end;
 
@@ -2195,9 +2171,9 @@ begin
     FBin.ResizeFollowTail:= false; //fixes scrolling to the end on file loading
     FBin.TextGutter:= true;
     FBin.TextPopupCommands:= [vpCmdCopy, vpCmdCopyHex, vpCmdSelectAll];
-    FBin.TextPopupCaption[vpCmdCopy]:= cStrMenuitemCopy;
-    FBin.TextPopupCaption[vpCmdCopyHex]:= cStrMenuitemCopy+' (hex)';
-    FBin.TextPopupCaption[vpCmdSelectAll]:= cStrMenuitemSelectAll;
+    FBin.TextPopupCaption[vpCmdCopy]:= ATEditorOptions.TextMenuitemCopy;
+    FBin.TextPopupCaption[vpCmdCopyHex]:= ATEditorOptions.TextMenuitemCopy+' (hex)';
+    FBin.TextPopupCaption[vpCmdSelectAll]:= ATEditorOptions.TextMenuitemSelectAll;
     FBin.Show;
   end;
 
@@ -2500,18 +2476,16 @@ var
   NameCounter: integer;
   SFileName, NameTemp, NameInitial: string;
   EventRes: TAppPyEventResult;
-  Params: TAppVariantArray;
 begin
   Result:= true;
   if FrameKind<>efkEditor then exit(true); //disable saving, but close
 
-  SetLength(Params, 0);
-  EventRes:= DoPyEvent(Ed, cEventOnSaveBefore, Params);
+  EventRes:= DoPyEvent(Ed, cEventOnSaveBefore, []);
   if EventRes.Val=evrFalse then exit(true); //disable saving, but close
 
   DoHideNotificationPanel(EditorObjToIndex(Ed));
 
-  SFileName:= GetFileName(Ed);
+  SFileName:= Ed.FileName;
   bNameChanged:= ASaveAs or (SFileName='');
 
   if bNameChanged then
@@ -2519,8 +2493,8 @@ begin
     An:= Lexer[Ed];
     if Assigned(An) then
     begin
-      SaveDialog.DefaultExt:= DoGetLexerDefaultExt(An);
-      SaveDialog.Filter:= DoGetLexerFileFilter(An, msgAllFiles);
+      SaveDialog.DefaultExt:= Lexer_GetDefaultExtension(An);
+      SaveDialog.Filter:= Lexer_GetFileFilterString(An, msgAllFiles);
     end
     else
     begin
@@ -2531,7 +2505,7 @@ begin
     if SFileName='' then
     begin
       NameInitial:= '';
-      EventRes:= DoPyEvent(Ed, cEventOnSaveNaming, Params);
+      EventRes:= DoPyEvent(Ed, cEventOnSaveNaming, []);
       if EventRes.Val=evrString then
         NameInitial:= EventRes.Str;
       if NameInitial='' then
@@ -2577,10 +2551,6 @@ begin
 
     //remove read-only (it may be set for original file)
     ReadOnly[Ed]:= false;
-
-    //add to recents new filename
-    if Assigned(FOnAddRecent) then
-      FOnAddRecent(Ed);
   end;
 
   bNotifWasEnabled:= NotifEnabled;
@@ -2598,13 +2568,18 @@ begin
   begin
     SetFileName(Ed, SFileName);
 
+    //add to recents new filename
+    if bNameChanged then
+      if Assigned(FOnAddRecent) then
+        FOnAddRecent(Ed);
+
     if not TabCaptionFromApi then
       UpdateCaptionFromFilename;
 
     DoSaveUndo(Ed, SFileName);
-    DoPyEvent(Ed, cEventOnSaveAfter, Params);
+    DoPyEvent(Ed, cEventOnSaveAfter, []);
     if Assigned(FOnSaveFile) then
-      FOnSaveFile(Self);
+      FOnSaveFile(Ed, SFileName);
   end;
 
   if EditorsLinked or (Ed=Ed1) then
@@ -2828,16 +2803,15 @@ end;
 procedure TEditorFrame.EditorOnClickGutter(Sender: TObject; ABand, ALine: integer);
 var
   Ed: TATSynEdit;
-  Params: TAppVariantArray;
 begin
   Ed:= Sender as TATSynEdit;
 
-  SetLength(Params, 3);
-  Params[0]:= AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState));
-  Params[1]:= AppVariant(ALine);
-  Params[2]:= AppVariant(ABand);
-
-  if DoPyEvent(Ed, cEventOnClickGutter, Params).Val = evrFalse then exit;
+  if DoPyEvent(Ed, cEventOnClickGutter,
+    [
+    AppVariant(ConvertShiftStateToString(KeyboardStateToShiftState)),
+    AppVariant(ALine),
+    AppVariant(ABand)
+    ]).Val = evrFalse then exit;
 
   if ABand=Ed.GutterBandBookmarks then
     ed.BookmarkToggleForLine(ALine, 1, '', bmadOption, true, 0);
@@ -3217,7 +3191,7 @@ begin
   if not FSaveHistory then exit;
   if UiOps.MaxHistoryFiles<2 then exit;
 
-  SFileName:= GetFileName(Ed);
+  SFileName:= Ed.FileName;
   if SFileName='' then exit;
   path:= SMaskFilenameSlashes(SFileName);
 
@@ -3439,8 +3413,8 @@ procedure TEditorFrame.DoSaveUndo(Ed: TATSynEdit; const AFileName: string);
 begin
   if IsFilenameListedInExtensionList(AFileName, UiOps.UndoPersistent) then
   begin
-    _WriteStringToFileInHiddenDir(GetAppUndoFilename(AFileName, false), Ed.UndoAsString);
-    _WriteStringToFileInHiddenDir(GetAppUndoFilename(AFileName, true), Ed.RedoAsString);
+    _WriteStringToFileInHiddenDir(AppFile_UndoRedo(AFileName, false), Ed.UndoAsString);
+    _WriteStringToFileInHiddenDir(AppFile_UndoRedo(AFileName, true), Ed.RedoAsString);
   end;
 end;
 
@@ -3521,6 +3495,19 @@ begin
       SplitPos:= i/cHistory_TabSplit_Mul;
   end;
 
+  //top line
+  //better set it before setting lexer (to not update syntax highlight because of OnScroll)
+  nTop:= c.GetValue(path+cHistory_TopLine, 0);
+  if nTop>0 then
+    Ed.LineTop:= nTop;
+
+  if EditorsLinked and Splitted then
+  begin
+    nTop:= c.GetValue(path+cHistory_TopLine2, 0);
+    if nTop>0 then
+      Ed2.LineTop:= nTop;
+  end;
+
   //lexer
   str0:= LexerName[Ed];
   str:= c.GetValue(path+cHistory_Lexer, ''); //missed value means none-lexer (for Cud 1.104 or older)
@@ -3554,7 +3541,9 @@ begin
 
   if not FileWasBig[Ed] then
   begin
-    NFlag:= c.GetValue(path+cHistory_Wrap, -1);
+    NFlag:= Min(
+      c.GetValue(path+cHistory_Wrap, -1),
+      Ord(High(TATEditorWrapMode)) );
     if NFlag>=0 then
       if Ed.OptWrapMode<>TATEditorWrapMode(NFlag) then
       begin
@@ -3641,17 +3630,6 @@ begin
   if Assigned(Lexer[Ed]) then
     Ed.FoldingAsStringTodo:= c.GetValue(path+cHistory_FoldedRanges, '');
 
-  nTop:= c.GetValue(path+cHistory_TopLine, 0);
-  if nTop>0 then
-    Ed.LineTop:= nTop;
-
-  if EditorsLinked and Splitted then
-  begin
-    nTop:= c.GetValue(path+cHistory_TopLine2, 0);
-    if nTop>0 then
-      Ed2.LineTop:= nTop;
-  end;
-
   //caret
   Sep.Init(sCaretString);
   Sep.GetItemInt(NCaretPosX, 0);
@@ -3664,7 +3642,7 @@ begin
   Caret:= Ed.Carets[0];
   if Caret.Change(NCaretPosX, NCaretPosY, NCaretEndX, NCaretEndY) then
   begin
-    Ed.DoCaretsFixIncorrectPos(true);
+    Ed.DoCaretsFixIncorrectPos(EditorOps.OpCaretOnLoadingLimitByLineEnds);
     Ed.DoEventCarets;
   end;
 
@@ -3687,11 +3665,11 @@ begin
   if SFileName='' then exit;
   if IsFilenameListedInExtensionList(SFileName, UiOps.UndoPersistent) then
   begin
-    STemp:= GetAppUndoFilename(SFileName, false);
+    STemp:= AppFile_UndoRedo(SFileName, false);
     if FileExists(STemp) then
       Ed.UndoAsString:= DoReadContentFromFile(STemp);
 
-    STemp:= GetAppUndoFilename(SFileName, true);
+    STemp:= AppFile_UndoRedo(SFileName, true);
     if FileExists(STemp) then
       Ed.RedoAsString:= DoReadContentFromFile(STemp);
   end;
@@ -3710,21 +3688,13 @@ begin
 end;
 
 procedure TEditorFrame.DoPyEventState(Ed: TATSynEdit; AState: integer);
-var
-  Params: TAppVariantArray;
 begin
-  SetLength(Params, 1);
-  Params[0]:= AppVariant(AState);
-  DoPyEvent(Ed, cEventOnStateEd, Params);
+  DoPyEvent(Ed, cEventOnStateEd, [AppVariant(AState)]);
 end;
 
 function TEditorFrame.DoPyEvent_Macro(const AText: string): boolean;
-var
-  Params: TAppVariantArray;
 begin
-  SetLength(Params, 1);
-  Params[0]:= AppVariant(AText);
-  Result:= DoPyEvent(Editor, cEventOnMacro, Params).Val <> evrFalse;
+  Result:= DoPyEvent(Editor, cEventOnMacro, [AppVariant(AText)]).Val <> evrFalse;
 end;
 
 
@@ -3844,7 +3814,7 @@ begin
     PanelInfo.Parent:= Self;
     PanelInfo.Align:= alTop;
     PanelInfo.Visible:= false;
-    PanelInfo.Height:= AppScale(26);
+    PanelInfo.Height:= ATEditorScale(26);
     PanelInfo.BevelOuter:= bvNone;
   end;
 
@@ -3862,8 +3832,8 @@ var
 begin
   if Assigned(PanelReload[Index]) then exit;
 
-  NPanelHeight:= AppScale(31);
-  NBtnHeight:= AppScale(25);
+  NPanelHeight:= ATEditorScale(31);
+  NBtnHeight:= ATEditorScale(25);
 
   PanelReload[Index]:= TPanel.Create(Self);
   PanelReload[Index].Parent:= Self;
@@ -4006,7 +3976,7 @@ var
   SName: string;
 begin
   if AFileName='' then exit;
-  DoLexerDetect(AFileName, TempLexer, TempLexerLite, SName, FLexerChooseFunc);
+  Lexer_DetectByFilename(AFileName, TempLexer, TempLexerLite, SName, FLexerChooseFunc);
   if Assigned(TempLexer) then
     Lexer[Ed]:= TempLexer
   else
@@ -4296,12 +4266,30 @@ begin
   end;
 end;
 
-function TEditorFrame.Modified: boolean;
+function TEditorFrame.Modified(ACheckOnSessionClosing: boolean=false): boolean;
 begin
   if FEditorsLinked then
     Result:= EditorIsModifiedEx(Ed1)
   else
     Result:= EditorIsModifiedEx(Ed1) or EditorIsModifiedEx(Ed2);
+
+  {
+  //asked in issue #3891 - close modified untitled tabs w/o confirmation
+  // it is to use in 2 places:
+  // 1. TfmMain.DoFileCloseAll
+  // 2. TfmMain.DoOnTabClose
+
+  if Result and ACheckOnSessionClosing then
+  begin
+    //don't ask to save tab, if we are closing session with untitled tab,
+    //and this tab was just saved (to session file) by Auto Save plugin
+    if AppSessionIsClosing and
+      EditorsLinked and
+      (FileName='') and
+      (VersionInSession=Ed1.Strings.ModifiedVersion) then
+     Result:= false;
+  end;
+  }
 end;
 
 procedure TEditorFrame.PanelInfoClick(Sender: TObject);
@@ -4315,5 +4303,27 @@ begin
   FTextCharsTyped:= 0;
   OnCallAutoCompletion(Ed, false);
 end;
+
+procedure TEditorFrame.LexerBackupSave;
+begin
+  if FLexerNameBackup<>'' then
+    raise Exception.Create('Unexpected non-empty Frame.LexerNameBackup');
+  FLexerNameBackup:= LexerName[Ed1];
+
+  Lexer[Ed1]:= nil;
+  if not EditorsLinked then
+    Lexer[Ed2]:= nil;
+
+  //fix crash: lexer is active in passive tab, LoadLexerLib deletes all lexers, user switches tab
+  LexerInitial[Ed1]:= nil;
+  LexerInitial[Ed2]:= nil;
+end;
+
+procedure TEditorFrame.LexerBackupRestore;
+begin
+  LexerName[Ed1]:= FLexerNameBackup;
+  FLexerNameBackup:= '';
+end;
+
 
 end.

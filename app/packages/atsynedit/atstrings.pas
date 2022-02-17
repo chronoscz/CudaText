@@ -22,23 +22,8 @@ uses
   ATSynEdit_Bookmarks,
   ATSynEdit_Gutter_Decor,
   ATSynEdit_Commands,
+  ATSynEdit_Options,
   EncConv;
-
-const
-  //set it to number of editors, which share same Strings obj
-  //(needed when UI tab is splitted to N parts, for the same file)
-  //set to 1 to allow only one editor for Strings obj (saves memory)
-  cMaxStringsClients = 2;
-
-  //if update count is less, do smarter wrapinfo update (find, replace items)
-  //smart update used only if lines changed, not deleted/inserted
-  cMaxUpdatesCountEasy = 200;
-
-  cStringsProgressLoadChars = 1000*1000;
-  cStringsProgressSaveLines = 100*1000;
-
-  //force utf8 for huge files on loading
-  cMaxFileSizeMbToDetectEncoding: integer = 50;
 
 type
   TATIntegerList = specialize TFPGList<integer>;
@@ -373,11 +358,11 @@ type
     procedure ActionDeleteFakeLine;
     procedure ActionDeleteFakeLineAndFinalEol;
     procedure ActionDeleteDupFakeLines;
-    procedure ActionDeleteAllBlanks;
-    procedure ActionDeleteAdjacentBlanks;
-    procedure ActionDeleteAdjacentDups;
-    procedure ActionDeleteAllDups(AKeepBlanks: boolean);
-    procedure ActionAddFakeLineIfNeeded;
+    function ActionDeleteAllBlanks: boolean;
+    function ActionDeleteAdjacentBlanks: boolean;
+    function ActionDeleteAdjacentDups: boolean;
+    function ActionDeleteAllDups(AKeepBlanks: boolean): boolean;
+    function ActionAddFakeLineIfNeeded: boolean;
     function ActionTrimSpaces(AMode: TATTrimSpaces): boolean;
     function ActionEnsureFinalEol: boolean;
     function ActionTrimFinalEmptyLines: boolean;
@@ -403,7 +388,7 @@ type
     procedure TextInsertColumnBlock(AX, AY: integer; ABlock: TATStrings;
       AOverwrite: boolean);
     procedure TextDeleteLeft(AX, AY: integer; ALen: integer; out AShift,
-      APosAfter: TPoint; AllowGoToPrevLine: boolean);
+      APosAfter: TPoint; AllowGoToPrevLine: boolean; out ATextChanged: boolean);
     procedure TextDeleteRight(AX, AY: integer; ALen: integer; out AShift,
       APosAfter: TPoint; ACanDelEol: boolean=true);
     function TextDeleteRange(AFromX, AFromY, AToX, AToY: integer; out AShift, APosAfter: TPoint): boolean;
@@ -461,10 +446,6 @@ function ATStrings_To_StringList(AStr: TATStrings): TStringList;
 function DetectStreamUtf8NoBom(Stream: TStream; BufSizeKb: word): TBufferUTF8State;
 function DetectStreamUtf16NoBom(Stream: TStream; BufSizeWords: integer; out IsLE: boolean): boolean;
 
-var
-  GlobalDetectUtf8BufferKb: integer = 8;
-  GlobalDetectUf16BufferWords: integer = 5;
-
 implementation
 
 uses
@@ -482,7 +463,7 @@ const
 
 procedure DoEncError;
 begin
-  raise Exception.Create('Unknown enc value');
+  raise Exception.Create('Unknown encoding value');
 end;
 
 procedure _ReadFileToStream(AStream: TStream;
@@ -1310,7 +1291,7 @@ begin
   FOneLine:= false;
   FProgressValue:= 0;
   FProgressKind:= cStringsProgressNone;
-  SetLength(CaretsAfterLastEdition, 0);
+  CaretsAfterLastEdition:= nil;
 
   ActionAddFakeLineIfNeeded;
   ClearUndo;
@@ -1372,21 +1353,24 @@ begin
       LinesEnds[Count-1]:= cEndNone;
 end;
 
-procedure TATStrings.ActionAddFakeLineIfNeeded;
+function TATStrings.ActionAddFakeLineIfNeeded: boolean;
 begin
   if Count=0 then
   begin
     LineAddRaw('', cEndNone, false{AWithEvent});
-    Exit
+    Exit(true);
   end;
 
-  if IsLastLineFake then Exit;
+  if IsLastLineFake then
+    Exit(false);
 
   if LinesEnds[Count-1]<>cEndNone then
   begin
     LineAddRaw('', cEndNone, false{AWithEvent});
-    Exit
+    Exit(true);
   end;
+
+  Result:= false;
 end;
 
 procedure TATStrings.LineAddRaw(const AString: atString; AEnd: TATLineEnds; AWithEvent: boolean);
@@ -2008,7 +1992,7 @@ begin
   if Assigned(FOnGetCaretsArray) then
     Result:= FOnGetCaretsArray()
   else
-    SetLength(Result, 0);
+    Result:= nil;
 end;
 
 function TATStrings.GetMarkersArray: TATInt64Array;
@@ -2016,7 +2000,7 @@ begin
   if Assigned(FOnGetMarkersArray) then
     Result:= FOnGetMarkersArray()
   else
-    SetLength(Result, 0);
+    Result:= nil;
 end;
 
 procedure TATStrings.SetCaretsArray(const L: TATPointArray);
@@ -2239,65 +2223,88 @@ begin
     LineDelete(Count-1, false, false, false);
 end;
 
-procedure TATStrings.ActionDeleteAllBlanks;
+function TATStrings.ActionDeleteAllBlanks: boolean;
 var
   i: integer;
 begin
+  Result:= false;
   ClearUndo;
   ClearLineStates(false);
 
   for i:= Count-1 downto 0 do
     if LinesBlank[i] then
+    begin
       FList.Delete(i);
+      Result:= true;
+    end;
 
-  ActionAddFakeLineIfNeeded;
-  ClearLineStates(false);
+  if Result then
+  begin
+    ActionAddFakeLineIfNeeded;
+    ClearUndo;
+    ClearLineStates(false);
 
-  DoEventChange(cLineChangeDeletedAll, -1, 1);
-  DoEventLog(0);
+    DoEventChange(cLineChangeDeletedAll, -1, 1);
+    DoEventLog(0);
+  end;
 end;
 
-procedure TATStrings.ActionDeleteAdjacentBlanks;
+function TATStrings.ActionDeleteAdjacentBlanks: boolean;
 var
   i: integer;
 begin
+  Result:= false;
   ClearUndo;
   ClearLineStates(false);
 
   for i:= Count-1 downto 1{!} do
     if LinesBlank[i] and LinesBlank[i-1] then
+    begin
       FList.Delete(i);
+      Result:= true;
+    end;
 
-  ActionAddFakeLineIfNeeded;
-  ClearLineStates(false);
+  if Result then
+  begin
+    ActionAddFakeLineIfNeeded;
+    ClearLineStates(false);
 
-  DoEventChange(cLineChangeDeletedAll, -1, 1);
-  DoEventLog(0);
+    DoEventChange(cLineChangeDeletedAll, -1, 1);
+    DoEventLog(0);
+  end;
 end;
 
-procedure TATStrings.ActionDeleteAdjacentDups;
+function TATStrings.ActionDeleteAdjacentDups: boolean;
 var
   i: integer;
 begin
+  Result:= false;
   ClearUndo;
   ClearLineStates(false);
 
   for i:= Count-1 downto 1{!} do
     if (LinesLen[i]=LinesLen[i-1]) and (Lines[i]=Lines[i-1]) then
+    begin
       FList.Delete(i);
+      Result:= true;
+    end;
 
-  ActionAddFakeLineIfNeeded;
-  ClearLineStates(false);
+  if Result then
+  begin
+    ActionAddFakeLineIfNeeded;
+    ClearLineStates(false);
 
-  DoEventChange(cLineChangeDeletedAll, -1, 1);
-  DoEventLog(0);
+    DoEventChange(cLineChangeDeletedAll, -1, 1);
+    DoEventLog(0);
+  end;
 end;
 
-procedure TATStrings.ActionDeleteAllDups(AKeepBlanks: boolean);
+function TATStrings.ActionDeleteAllDups(AKeepBlanks: boolean): boolean;
 var
   i, j, NLen: integer;
   S: UnicodeString;
 begin
+  Result:= false;
   ClearUndo;
   ClearLineStates(false);
 
@@ -2311,27 +2318,31 @@ begin
       if (NLen=LinesLen[j]) and (S=Lines[j]) then
       begin
         FList.Delete(i);
+        Result:= true;
         Break
       end;
   end;
 
-  ActionAddFakeLineIfNeeded;
-  ClearLineStates(false);
+  if Result then
+  begin
+    ActionAddFakeLineIfNeeded;
+    ClearLineStates(false);
 
-  DoEventChange(cLineChangeDeletedAll, -1, 1);
-  DoEventLog(0);
+    DoEventChange(cLineChangeDeletedAll, -1, 1);
+    DoEventLog(0);
+  end;
 end;
 
 
 procedure TATStrings.ActionReverseLines;
 var
-  Cnt, i, mid: integer;
+  NCount, NMiddle, i: integer;
 begin
   ActionEnsureFinalEol;
   ActionDeleteFakeLine;
 
-  Cnt:= Count;
-  if Cnt<2 then
+  NCount:= Count;
+  if NCount<2 then
   begin
     ActionAddFakeLineIfNeeded;
     exit;
@@ -2340,12 +2351,12 @@ begin
   ClearUndo;
   ClearLineStates(false);
 
-  mid:= Cnt div 2;
-  if Odd(Cnt) then
-    Inc(mid);
+  NMiddle:= NCount div 2;
+  if Odd(NCount) then
+    Inc(NMiddle);
 
-  for i:= Cnt-1 downto mid do
-    FList.Exchange(i, Cnt-1-i);
+  for i:= NCount-1 downto NMiddle do
+    FList.Exchange(i, NCount-1-i);
 
   ActionAddFakeLineIfNeeded;
   ClearLineStates(false);
@@ -2406,7 +2417,7 @@ begin
     Exit
   end;
 
-  if FListUpdates.Count>cMaxUpdatesCountEasy then
+  if FListUpdates.Count>ATEditorOptions.MaxUpdatesCountEasy then
   begin
     FListUpdatesHard:= true;
     Exit

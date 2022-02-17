@@ -15,6 +15,7 @@ uses
   Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Types,
   StdCtrls, ExtCtrls, Dialogs, IniFiles,
   ATSynEdit,
+  ATSynEdit_Options,
   ATSynEdit_Edits,
   ATSynEdit_Keymap,
   ATStringProc,
@@ -52,7 +53,7 @@ type
   private
     { private declarations }
     keymapList: TFPList;
-    FOnMsg: TStrEvent;
+    FOnMsg: TAppStringEvent;
     FColorBg: TColor;
     FColorBgSel: TColor;
     FColorFont: TColor;
@@ -84,7 +85,7 @@ type
     OptAllowConfig: boolean;
     OptAllowConfigForLexer: boolean;
     OptFocusedCommand: integer;
-    property OnMsg: TStrEvent read FOnMsg write FOnMsg;
+    property OnMsg: TAppStringEvent read FOnMsg write FOnMsg;
     property ListCaption: string read GetListCaption write SetListCaption;
   end;
 
@@ -120,7 +121,7 @@ var
 begin
   Localize;
 
-  edit.Height:= AppScale(UiOps.InputHeight);
+  edit.Height:= ATEditorScale(UiOps.InputHeight);
   edit.Font.Name:= EditorOps.OpFontName;
   edit.Font.Size:= EditorOps.OpFontSize;
   edit.Font.Quality:= EditorOps.OpFontQuality;
@@ -129,7 +130,7 @@ begin
   edit.OptCaretBlinkTime:= EditorOps.OpCaretBlinkTime;
 
   PanelCaption.Font.Name:= UiOps.VarFontName;
-  PanelCaption.Font.Size:= AppScaleFont(UiOps.VarFontSize);
+  PanelCaption.Font.Size:= ATEditorScaleFont(UiOps.VarFontSize);
 
   ButtonCancel.Width:= ButtonCancel.Height;
 
@@ -206,12 +207,12 @@ begin
   PanelInfo.Parent:= Self;
   PanelInfo.Align:= alClient;
   PanelInfo.Font.Name:= UiOps.VarFontName;
-  PanelInfo.Font.Size:= AppScaleFont(UiOps.VarFontSize);
+  PanelInfo.Font.Size:= ATEditorScaleFont(UiOps.VarFontSize);
   PanelInfo.BorderSpacing.Around:= 20;
   PanelInfo.Caption:= msgCmdPalettePrefixHelp;
 
-  Width:= AppScale(UiOps.ListboxSizeX);
-  Height:= AppScale(UiOps.ListboxSizeY);
+  Width:= ATEditorScale(UiOps.ListboxSizeX);
+  Height:= ATEditorScale(UiOps.ListboxSizeY);
 end;
 
 procedure TfmCommands.editChange(Sender: TObject);
@@ -616,12 +617,12 @@ var
   fn: string;
   ini: TIniFile;
 begin
-  fn:= GetAppLangFilename;
+  fn:= AppFile_Language;
   if FileExists(fn) then
   begin
     ini:= TIniFile.Create(fn);
     try
-      edit.OptTextHint:= ini.ReadString(section, 'cmd_tip', edit.OptTextHint);
+      msgCmdPaletteTextHint:= ini.ReadString(section, 'cmd_tip', msgCmdPaletteTextHint);
     finally
       FreeAndNil(ini);
     end;

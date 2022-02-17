@@ -3,6 +3,92 @@
   - fixed
   * changed
 
+
+1.156.1 (2022/02)
+
+- fix: regression with option "renderer_anti_flicker":20 (values 1...999): a) Console is not repainted until click; b) plugin Sync Scroll work is broken (thanks @TomBraider42)
+
+1.156.0 (2022/02)
+
+* change: lexer 'Ini files' removed to Addon Manager; instead added _lite_ lexer 'Ini files ^' (thanks @sl23)
++ add: Project Manager: 'Go to file' menu has history of last chosen items, in the list beginning (thanks @andersaamodt)
+- fix: editing in sub-lexer range (e.g. in HTML/PHP) breaks highlighting in that range (thanks @TomBraider42)
+- fix: bug with option "autocomplete_html_autoclose":true with caret on line end (thanks @TomBraider42) 
+- fix: lexer JS: fixes for 'regex literals' rule
+
+1.155.3 (2022/01)
+
+* change: add the workaround for very slow work with huge line length=40M in XML file, which is handled by XML^ lite lexer: app now doesn't parse the line after 4K chars. The limit is taken from the old option "max_line_len_parsed". (thanks @tmsg)
++ add: new command "find: toggle+focus dialog" (thanks @DUOLabs333)
++ add: lexer Lua: add style for "documentation comments"
+- fix: auto-completion for JS block inside PHP file (thanks @TomBraider42)
+- fix: wrong saving of key "session" to "settings/history.json" (thanks @DUOLabs333)
+- fix: wrong opening of several files at once, by Enter from Windows Explorer, with "ui_one_instance":true (thanks @jroblesr)
+- fix: if a tool from plugin External Tools is called while recording a macro, macro becomes incorrect (thanks @cser)
+- fix: dialogs 'Open file'/'Save file as' on Windows have bad looking 'filter' field
+- fix: plugin Colored Indent didn't get on_state call (thanks @JairoMartinezA) 
+- fix: lexer CSS: wrong highlight of 'rgb(func(some), ...)'
+
+1.155.0 (2022/01)
+
++ add: rendering is much faster for the case of huge line length=40M in the word-wrapped mode
++ add/change: improve logic of option "unprinted_content"; its "x" flag now works only with selection; added flag "X" which also works only with selection (thanks @JairoMartinezA)
+* change: delete last enumeration-value of option "wrap_mode" (value 3 worked the same as 2)
+- fix: file loading progress-bar was not shown for huge single-line file
+- fix: on opening of big file with lexer (e.g. size 1M), beginning of the file was not colored until the entire file is parsed
+
+1.154.0 (2022/01)
+
++ add: Ctrl + mouse_wheel_click now adds/removes caret (like in Sublime Text) (thanks @johntor)
++ add: Ctrl + mouse_wheel_drag now makes column selection (almost like in Sublime Text, here it removes old carets)
++ add: it's possible to assign Ctrl+click to 'go to definition', via new value "c" of "mouse_goto_definition" (thanks @johntor)
++ add: better support DocBlock plugin, by allowing the auto-completion inside _documentation_ comments (thanks @TomBraider42)
++ add: Project Manager: command "Go To file" is now much faster (patch by @bscan)
++ add: option "dim_unfocused" dims more correctly (+gutter, +ruler, +folded blocks)
++ add: lexer RegEx handles constructs like [^]] (thanks @kvichans)
+* change: default value of "mouse_goto_definition" changed to "ca" (old value "a" was not Linux compatible)
+- fix: typing the text in 'Overwrite mode' over emoji text
+- fix: search engine bug with RegEx: change of 'case sensitive' (with the same text) did not recompile the RegEx
+- fix: few issues in the Emmet engine (thanks Rickard)
+- fix: command "delete word previous" didn't move caret, if it was after line end (thanks @hiiamboris)
+
+1.153.5 (2022/01)
+
+* change: hotkey for Find (Replace) dialog always results in the search box being focused, like in ST4 and VSCode (thanks @andersaamodt)
++ add: hotkeys of commands "switch tab ..." / "... focus ..." work also in the Find dialog (thanks @andersaamodt)
++ add: better Console message on saving session: "N file(s) + M untitled"
++ add: new API for Auto Save plugin (thanks @andersaamodt)
+- fix: plugin Auto Save could overwrite session file list from another session (thanks @JairoMartinezA)
+- fix: sometimes after session loading, or 'close all tabs', editor UI control hides completely
+
+1.153.0 (2022/01)
+
++ add: it's possible to hide folding gutter icon for small blocks, via new option "fold_icon_min_range"
++ add: show descriptive error message in Console on loading broken lexer
++ add: lexer CSS: add separate styling for '.id' and '#id' like in VSCode (thanks @andersaamodt)
+- fix: regression in 1.152: auto-scrolling (mouse is dragged out of editor) didn't work
+- fix: auto-completion didn't detect proper sub-lexer in fenced code-blocks
+- fix: BackSpace hides the caret if after the line-end and "caret_blink_en":false (thanks @hiiamboris)
+- fix: syntax highlight wasn't updated after 'duplicate line'/'paste' at the end of a sub-lexer block (thanks @WebMechanic)
+
+1.152.5 (2021/12)
+
++ add: picture viewer supports WEBP/TGA/PSD/CUR, if option "picture_types" allows it
++ add: HTML auto-completion: support filenames with spaces
++ add: HTML auto-completion: support picture filetypes WEBP, AVIF (thanks @WebMechanic)
++ add: HTML auto-completion: support filename completion in <SOURCE SRCSET=""> (thanks @WebMechanic)
++ add: lexer Assembly: update opcodes list
+* change: Project Manager: use macro {ProjDir} when storing filenames (relative) to project files (thanks @cser)
+* change: Unicode math chars U+2200...U+22FF now have the auto-detection widths, with "unicode_proportional":true (thanks @cser)
+
+1.152.1 (2021/12)
+
+- fix: lexer Bash: numbers rule (thanks @eltonfabricio10)
+- fix: sometimes after drag-drop of text inside single file, syntax highlight was broken
+- fix: sometimes after installing of a lexer, ui-tabs got none-lexer (thanks @hiiamboris)
+- fix: commands "carets extend: ..." did not respect option "caret_proximity_vert" (thanks @hiiamboris)
+- fix: plugin Comments: bug with selection, which is _backward_ and until start-of-line (thanks @hiiamboris)
+
 1.152.0 (2021/12)
 
 + add: lexer HTML: add sub-lexer 'HTML style' to highlight style="..." blocks like CSS does
@@ -16,7 +102,7 @@
 + add: Tab-key in the code-tree (focused treeview or filter) should not jump to bottom panel (console input/log), and vice versa (thanks @hiiamboris, @JairoMartinezA)
 - fix: Qt5/macOS: major fix for the text cropped on left, when "renderer_tweaks" misses 'w' (thanks @somewhat)
 - fix: crash on very long line length=120K, with lexer active and wrap=off (thanks Ertan)
-- fix: command "codetree: focus filter" didn't work in gtk2/qt5 versions
+- fix: command "codetree: focus filter" didn't work in GTK2/Qt5 versions
 
 1.151.0 (2021/12)
 

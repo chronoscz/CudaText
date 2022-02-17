@@ -53,7 +53,7 @@ STD_LEXERS = (
   'C++',
   'CSS',
   'HTML',
-  'Ini files',
+  'HTML style',
   'JavaScript',
   'JSDoc',
   'JSON',
@@ -70,6 +70,7 @@ STD_LEXERS = (
   'YAML',
 )
 STD_LEXERS_LITE = (
+  'Ini files',
   'JSON',
   'Log files',
   'SQL',

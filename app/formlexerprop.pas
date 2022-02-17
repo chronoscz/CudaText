@@ -153,7 +153,7 @@ var
   ini: TIniFile;
   fn: string;
 begin
-  fn:= GetAppLangFilename;
+  fn:= AppFile_Language;
   if not FileExists(fn) then exit;
   ini:= TIniFile.Create(fn);
   try
@@ -247,15 +247,15 @@ begin
   for i:= 0 to FAnalyzer.Formats.Count-1 do
     FAnalyzer.Formats.Items[i].Assign(FFormats[i]);
 
-  DoSaveLexerStylesToFile_JsonLexerOps(
+  Lexer_SaveStylesToFile_JsonLexerOps(
     FAnalyzer,
-    GetAppLexerOpsFilename(FAnalyzer.LexerName)
+    AppFile_LexerOps(FAnalyzer.LexerName)
     );
 end;
 
 procedure TfmLexerProp.SaveChangedComments;
 begin
-  with TIniFile.Create(GetAppLexerMapFilename(FAnalyzer.LexerName)) do
+  with TIniFile.Create(AppFile_LexerMap(FAnalyzer.LexerName)) do
   try
     if edCmtStream1.Text<>'' then
     begin

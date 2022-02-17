@@ -148,7 +148,8 @@ procedure EditorBracket_FindOpeningBracketBackward(Ed: TATSynEdit;
 type
   TATEditorFinderCallback = procedure(AFound: boolean; AFinder: TATEditorFinder) of object;
 
-function EditorGetTokenKind(Ed: TATSynEdit; AX, AY: integer): TATTokenKind;
+function EditorGetTokenKind(Ed: TATSynEdit; AX, AY: integer;
+  ADocCommentIsAlsoComment: boolean=true): TATTokenKind;
 function EditorExpandSelectionToWord(Ed: TATSynEdit;
   AFinderResultCallback: TATEditorFinderCallback;
   AAndSelect: boolean): boolean;
@@ -170,6 +171,7 @@ procedure EditorApplyOps(Ed: TATSynEdit; const Op: TEditorOps;
   AApplyUnprintedAndWrap, AApplyTabSize, AApplyCentering, AOneLiner: boolean);
 var
   Sep: TATStringSeparator;
+  MouseActions: TATEditorMouseActions;
   N: integer;
 begin
   Ed.Font.Name:= Op.OpFontName;
@@ -198,7 +200,7 @@ begin
   end;
 
   Ed.OptBorderFocusedActive:= Op.OpActiveBorderInEditor;
-  Ed.OptBorderWidthFocused:= AppScale(Op.OpActiveBorderWidth);
+  Ed.OptBorderWidthFocused:= ATEditorScale(Op.OpActiveBorderWidth);
 
   Ed.OptOverwriteSel:= Op.OpOverwriteSel;
   Ed.OptOverwriteAllowedOnPaste:= Op.OpOverwriteOnPaste;
@@ -283,6 +285,7 @@ begin
     Ed.OptUnprintedSpacesTrailing:= Pos('t', Op.OpUnprintedContent)>0;
     Ed.OptUnprintedSpacesBothEnds:= Pos('l', Op.OpUnprintedContent)>0;
     Ed.OptUnprintedSpacesOnlyInSelection:= Pos('x', Op.OpUnprintedContent)>0;
+    Ed.OptUnprintedSpacesAlsoInSelection:= Pos('X', Op.OpUnprintedContent)>0;
   end;
 
   Ed.OptMaxLineLenToTokenize:= Op.OpMaxLineLenToTokenize;
@@ -360,6 +363,7 @@ begin
   begin
     Ed.OptFoldStyle:= TATEditorFoldStyle(Op.OpFoldStyle);
     Ed.OptFoldTooltipVisible:= Op.OpFoldTooltipShow;
+    Ed.OptFoldIconForMinimalRangeHeight:= Op.OpFoldIconForMinimalRangeHeight;
 
     Ed.OptMarkersSize:= Op.OpMarkerSize;
     Ed.OptStapleStyle:= TATLineStyle(Op.OpStaplesStyle);
@@ -391,6 +395,10 @@ begin
     Ed.OptIndentKeepsAlign:= Op.OpUnIndentKeepsAlign;
     Ed.OptIndentMakesWholeLinesSelection:= Op.OpIndentMakesWholeLineSel;
   end;
+
+  //change Ctrl+click to 'goto definition' and Ctrl+Wheel to 'add caret'
+  InitEditorMouseActions(MouseActions, Op.OpMouseGotoDefinition='c');
+  Ed.MouseActions:= MouseActions;
 
   Ed.OptMouse2ClickDragSelectsWords:= Op.OpMouse2ClickDragSelectsWords;
   Ed.OptMouseDragDrop:= Op.OpMouseDragDrop;
@@ -427,7 +435,7 @@ end;
 procedure EditorApplyOpsCommon(Ed: TATSynEdit);
 begin
   Ed.OptBorderFocusedActive:= EditorOps.OpActiveBorderInControls;
-  Ed.OptBorderWidthFocused:= AppScale(EditorOps.OpActiveBorderWidth);
+  Ed.OptBorderWidthFocused:= ATEditorScale(EditorOps.OpActiveBorderWidth);
   Ed.OptCaretBlinkEnabled:= EditorOps.OpCaretBlinkEn;
   Ed.OptCaretBlinkTime:= EditorOps.OpCaretBlinkTime;
   Ed.OptScrollbarsNew:= EditorOps.OpScrollbarsNew;
@@ -614,6 +622,9 @@ begin
   Ed.Colors.TextDisabledBG:= GetAppColor(apclEdDisableBg);
   Ed.Colors.Caret:= GetAppColor(apclEdCaret);
   Ed.Colors.Markers:= GetAppColor(apclEdMarkers);
+  Ed.Colors.MacroRecordBorder:= Ed.Colors.Markers;
+  Ed.Colors.DragDropMarker:= Ed.Colors.Markers;
+  Ed.Colors.GitMarkerBG:= Ed.Colors.Markers;
   Ed.Colors.CurrentLineBG:= GetAppColor(apclEdCurLineBg);
   Ed.Colors.IndentVertLines:= GetAppColor(apclEdIndentVLine);
   Ed.Colors.UnprintedFont:= GetAppColor(apclEdUnprintFont);
@@ -1747,7 +1758,8 @@ begin
     SClipboardCopy(Ed.TextSelected, PrimarySelection);
 end;
 
-function EditorGetTokenKind(Ed: TATSynEdit; AX, AY: integer): TATTokenKind;
+function EditorGetTokenKind(Ed: TATSynEdit; AX, AY: integer;
+  ADocCommentIsAlsoComment: boolean): TATTokenKind;
 var
   NLen: integer;
 begin
@@ -1763,7 +1775,7 @@ begin
       exit;
     if AX=NLen then //caret at line end: decrement X
       Dec(AX);
-    Result:= TATAdapterEControl(Ed.AdapterForHilite).GetTokenKindAtPos(Point(AX, AY))
+    Result:= TATAdapterEControl(Ed.AdapterForHilite).GetTokenKindAtPos(Point(AX, AY), ADocCommentIsAlsoComment)
   end;
 end;
 
@@ -2182,6 +2194,7 @@ var
   OpenedRound: TATIntArray;
   OpenedSquare: TATIntArray;
   LevelRound, LevelSquare: integer;
+  PosSquareOpen: integer;
   S: UnicodeString;
   ch: WideChar;
   i: integer;
@@ -2190,11 +2203,12 @@ begin
   if AOnlyClear then exit;
 
   S:= Ed.Text;
-  SetLength(Bads, 0);
-  SetLength(OpenedRound, 0);
-  SetLength(OpenedSquare, 0);
+  Bads:= nil;
+  OpenedRound:= nil;
+  OpenedSquare:= nil;
   LevelRound:= 0;
   LevelSquare:= 0;
+  PosSquareOpen:= 0;
   i:= 0;
 
   while i<Length(S) do
@@ -2234,6 +2248,11 @@ begin
       begin
         AddArrayItem(OpenedSquare, i);
         Inc(LevelSquare);
+
+        PosSquareOpen:= i;
+        if (i<Length(S)) and (S[i+1]='^') then
+          Inc(PosSquareOpen);
+
         Continue;
       end;
 
@@ -2241,9 +2260,13 @@ begin
     begin
       if LevelSquare<1 then
         AddArrayItem(Bads, i);
-      if LevelSquare>0 then
+      //don't close by ']' immediately after '[' or '[^'
+      if (LevelSquare>0) and (PosSquareOpen>0) and (i-PosSquareOpen>1) then
+      begin
         Dec(LevelSquare);
-      DeleteArrayLastItem(OpenedSquare);
+        PosSquareOpen:= 0;
+        DeleteArrayLastItem(OpenedSquare);
+      end;
       Continue;
     end;
   end;
@@ -2624,26 +2647,36 @@ end;
 procedure EditorAutoCloseClosingHtmlTag(Ed: TATSynEdit; AX, AY: integer);
 var
   SText: UnicodeString;
-  STag: UnicodeString;
+  STag: string;
   SLexer: string;
+  St: TATStrings;
   ch: WideChar;
+  NLen: integer;
 begin
   if Ed.Carets.Count<>1 then exit; //don't support multi-carets
   if not (UiOps.AutocompleteHtml and UiOps.AutocompleteHtml_AutoClose) then exit;
   if Ed.AdapterForHilite=nil then exit;
   SLexer:= Ed.AdapterForHilite.GetLexerName;
   if SLexer='' then exit;
+  St:= Ed.Strings;
 
-  if not Ed.Strings.IsIndexValid(AY) then exit;
+  if not St.IsIndexValid(AY) then exit;
+  NLen:= St.LinesLen[AY];
   if AX<2 then exit;
-  ch:= Ed.Strings.LineCharAt(AY, AX);
+  if AX>NLen then exit;
+  if AX<NLen then
+  begin
+    ch:= St.LineCharAt(AY, AX+1);
+    if IsCharWord(ch, Ed.OptNonWordChars) then exit;
+  end;
+  ch:= St.LineCharAt(AY, AX);
   if ch<>'/' then exit;
-  ch:= Ed.Strings.LineCharAt(AY, AX-1);
+  ch:= St.LineCharAt(AY, AX-1);
   if ch<>'<' then exit;
 
   if not SRegexMatchesString(SLexer, UiOps.AutocompleteHtml_Lexers, false) then exit;
 
-  SText:= Ed.Strings.TextSubstring(0, 0, AX-2, AY);
+  SText:= St.TextSubstring(0, 0, AX-2, AY);
   STag:= EditorFindHtmlLastOpenedTagInText(SText);
   if STag='' then exit;
 

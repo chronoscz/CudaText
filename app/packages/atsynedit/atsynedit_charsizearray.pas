@@ -135,19 +135,40 @@ begin
 
   for i:= $2010 to $2027 do
     FixedSizes[i]:= uw_normal;
+  FixedSizes[$2026]:= 0; //ellipsis char should be full-width? but user wants normal width, CudaText issue #3873
+
   for i:= $2030 to $203A do
     FixedSizes[i]:= uw_normal;
   //"Superscripts and Subscripts" block which goes from 0x2070 to 0x209F
   for i:= $2070 to $209F do
     FixedSizes[i]:= uw_normal;
 
-  FixedSizes[$2026]:= uw_fullwidth; //ellipsis char should be full-width
   FixedSizes[$20AC]:= uw_normal;
   FixedSizes[$2122]:= uw_normal;
 
   //math operators
+  { //let's not force widths of math chars - see CudaText issue #3873, where user asked to force them
   for i:= $2200 to $22FF do
     FixedSizes[i]:= uw_fullwidth;
+  FixedSizes[$2200]:= uw_normal;
+  FixedSizes[$2203]:= uw_normal;
+  FixedSizes[$2205]:= uw_normal;
+  FixedSizes[$2208]:= uw_normal;
+  FixedSizes[$2209]:= uw_normal;
+  FixedSizes[$221a]:= uw_normal;
+  FixedSizes[$2227]:= uw_normal;
+  FixedSizes[$2228]:= uw_normal;
+  FixedSizes[$222A]:= uw_normal;
+  FixedSizes[$2248]:= uw_normal;
+  FixedSizes[$2260]:= uw_normal;
+  FixedSizes[$2264]:= uw_normal;
+  FixedSizes[$2265]:= uw_normal;
+  FixedSizes[$2282]:= uw_normal;
+  FixedSizes[$2283]:= uw_normal;
+  FixedSizes[$2286]:= uw_normal;
+  FixedSizes[$2287]:= uw_normal;
+  FixedSizes[$22C2]:= uw_normal;
+  }
 
   //"Miscellaneous Symbols" block which goes from 0x2600 to 0x26FF
   for i:= $2600 to $26FF do

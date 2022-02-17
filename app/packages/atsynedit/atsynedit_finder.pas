@@ -78,9 +78,10 @@ type
     FMatchPos: integer;
     FMatchLen: integer;
     FStrFind: UnicodeString;
-    FStrFindCompiled: UnicodeString;
     FStrReplace: UnicodeString;
     FStrFindUnicode: boolean;
+    FCachedText: UnicodeString;
+    FCachedOptCase: boolean;
     FRegex: TRegExpr;
     FRegexReplacer: TRegExpr;
     FRegexBad: boolean;
@@ -474,9 +475,11 @@ begin
   InitRegex;
 
   try
-    if FStrFindCompiled<>StrFind then
+    if (FCachedText<>StrFind) or
+      (FCachedOptCase<>OptCase) then
     begin
-      FStrFindCompiled:= StrFind;
+      FCachedText:= StrFind;
+      FCachedOptCase:= OptCase;
       FRegex.ModifierI:= not OptCase;
       FRegex.Expression:= StrFind;
       FRegex.Compile;
@@ -642,9 +645,11 @@ begin
   SNew:= '';
 
   try
-    if FStrFindCompiled<>StrFind then
+    if (FCachedText<>StrFind) or
+      (FCachedOptCase<>OptCase) then
     begin
-      FStrFindCompiled:= StrFind;
+      FCachedText:= StrFind;
+      FCachedOptCase:= OptCase;
       FRegex.ModifierI:= not OptCase;
       FRegex.Expression:= StrFind;
       FRegex.Compile;
@@ -2049,7 +2054,7 @@ begin
   StringArray_SetFromString(ListParts, SFind, OptBack);
   PartCount:= Length(ListParts);
   if PartCount=0 then exit;
-  SetLength(ListLooped, 0);
+  ListLooped:= nil;
 
   SLinePartW:= ListParts[0];
   SLinePart_Len:= Length(SLinePartW);

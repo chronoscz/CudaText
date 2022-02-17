@@ -1,17 +1,3 @@
-var
-  cBitmapWait: TPortableNetworkGraphic = nil;
-  cBitmapSaving: TPortableNetworkGraphic = nil;
-  cBitmapNiceScroll: TPortableNetworkGraphic = nil;
-  cBitmapFoldPlus: TPortableNetworkGraphic = nil;
-  cBitmapFoldMinus: TPortableNetworkGraphic = nil;
-
-const
-  crNiceScrollNone  = TCursor(-40);
-  crNiceScrollUp    = TCursor(-41);
-  crNiceScrollDown  = TCursor(-42);
-  crNiceScrollLeft  = TCursor(-43);
-  crNiceScrollRight = TCursor(-44);
-
 const
   //under Mac don't use Ctrl key, use Meta key as default (e.g. Meta+C, Meta+A)
   ssXControl = {$ifndef darwin} ssCtrl {$else} ssMeta {$endif};
@@ -136,56 +122,6 @@ begin
     (A.NPixelOffset=B.NPixelOffset);
 end;
 
-function EditorResourceScaleSuffix: string;
-var
-  N: integer;
-begin
-  N:= Screen.PixelsPerInch;
-  if N>=96*2 then
-    Result:= '_200'
-  else
-  if N>=(96 * 3 div 2) then
-    Result:= '_150'
-  else
-    Result:= '';
-end;
-
-procedure InitEditorResources;
-var
-  Suffix: string;
-begin
-  Suffix:= EditorResourceScaleSuffix;
-
-  Screen.Cursors[crNiceScrollNone]:= LoadCursor(HInstance, 'ATSYN_MOVE');
-  Screen.Cursors[crNiceScrollUp]:= LoadCursor(HInstance, 'ATSYN_MOVE_U');
-  Screen.Cursors[crNiceScrollDown]:= LoadCursor(HInstance, 'ATSYN_MOVE_D');
-  Screen.Cursors[crNiceScrollLeft]:= LoadCursor(HInstance, 'ATSYN_MOVE_L');
-  Screen.Cursors[crNiceScrollRight]:= LoadCursor(HInstance, 'ATSYN_MOVE_R');
-
-  cBitmapNiceScroll:= TPortableNetworkGraphic.Create;
-  cBitmapNiceScroll.LoadFromResourceName(HInstance, 'ATSYN_SCROLLMARK'+Suffix);
-
-  cBitmapWait:= TPortableNetworkGraphic.Create;
-  cBitmapWait.LoadFromResourceName(HInstance, 'ATSYN_WAIT');
-
-  cBitmapSaving:= TPortableNetworkGraphic.Create;
-  cBitmapSaving.LoadFromResourceName(HInstance, 'ATSYN_SAVE');
-
-  cBitmapFoldPlus:= TPortableNetworkGraphic.Create;
-  cBitmapFoldPlus.LoadFromResourceName(HInstance, 'ATSYN_FOLD_P'+Suffix);
-
-  cBitmapFoldMinus:= TPortableNetworkGraphic.Create;
-  cBitmapFoldMinus.LoadFromResourceName(HInstance, 'ATSYN_FOLD_M'+Suffix);
-end;
-
-procedure FreeEditorResources;
-begin
-  FreeAndNil(cBitmapWait);
-  FreeAndNil(cBitmapSaving);
-  FreeAndNil(cBitmapNiceScroll);
-  FreeAndNil(cBitmapFoldPlus);
-  FreeAndNil(cBitmapFoldMinus);
-end;
 
 function EditorDoubleBufferedNeeded: boolean;
 begin
@@ -193,34 +129,50 @@ begin
 end;
 
 
-procedure InitEditorMouseActions(var M: TATEditorMouseActionArray);
+procedure InitEditorMouseActions(out M: TATEditorMouseActions; ANoCtrlClickForCaret: boolean);
+var
+  NCount: integer;
   //
-  procedure Add(AId: TATEditorMouseAction; AState: TShiftState);
+  procedure Add(AId: TATEditorMouseAction; AState: TShiftState); inline;
   begin
-    SetLength(M, Length(M)+1);
-    M[High(M)].MouseActionId:= AId;
-    M[High(M)].MouseState:= AState;
+    M[NCount].MouseActionId:= AId;
+    M[NCount].MouseState:= AState;
+    Inc(NCount);
   end;
   //
 begin
-  SetLength(M, 0);
+  M:= nil;
+  NCount:= 0;
+
+  //realloc to some big length
+  SetLength(M, 20);
 
   Add(cMouseActionClickSimple, [ssLeft]);
   Add(cMouseActionClickRight, [ssRight]);
   Add(cMouseActionClickAndSelNormalBlock, [ssLeft, ssShift]);
   Add(cMouseActionClickAndSelVerticalBlock, [ssLeft, ssAlt, ssShift]);
-  Add(cMouseActionMakeCaret, [ssLeft, ssXControl]);
+
+  if ANoCtrlClickForCaret then
+    Add(cMouseActionClickSimple, [ssLeft, ssXControl])
+  else
+    Add(cMouseActionMakeCaret, [ssLeft, ssXControl]);
+
   Add(cMouseActionMakeCaretsColumn, [ssLeft, ssXControl, ssShift]);
+
   Add(cMouseActionClickMiddle, [ssMiddle]);
+  Add(cMouseActionMakeCaret, [ssMiddle, ssXControl]);
 
   Add(cMouseActionClickSimple, [ssLeft, ssAlt]);
   Add(cMouseActionClickSimple, [ssLeft, ssAltGr]);
   Add(cMouseActionClickSimple, [ssLeft, ssAlt, ssXControl]);
   Add(cMouseActionClickSimple, [ssLeft, ssAlt, ssShift, ssXControl]);
+
+  //realloc at end, to actual count
+  SetLength(M, NCount);
 end;
 
 
-function EditorMouseActionId(const M: TATEditorMouseActionArray; State: TShiftState): TATEditorMouseAction;
+function EditorMouseActionId(const M: TATEditorMouseActions; State: TShiftState): TATEditorMouseAction;
 var
   i: integer;
 begin

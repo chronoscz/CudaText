@@ -18,7 +18,9 @@ begin
 
   SParam:= '';
   if Length(AParams)>0 then
-    SParam:= AppVariantToString(AParams[0]);
+    SParam:= AppVariantToString(AParams[0], false{AndQuote});
+    //AndQuote=false to fix CudaText issue #3929
+
   SPyText:= 'py:'+AModule+','+AMethod+','+SParam;
 
   if Frame.MacroRecord then
@@ -64,12 +66,9 @@ begin
   end;
 
   if CmdItem.ItemProcParam<>'' then
-  begin
-    SetLength(Params, 1);
-    Params[0]:= AppVariant(CmdItem.ItemProcParam);
-  end
+    Params:= [AppVariant(CmdItem.ItemProcParam)]
   else
-    SetLength(Params, 0);
+    Params:= [];
 
   DoPyCommand(CmdItem.ItemModule, CmdItem.ItemProc, Params, AInvoke);
 end;
@@ -87,6 +86,7 @@ var
   Frame: TEditorFrame;
   MaxPriority, NPlugin, NPriority: integer;
   Plugin: TAppEventInfo;
+  bCheckLexer: boolean;
   bLazy: boolean;
 begin
   Result.Val:= evrOther;
@@ -102,11 +102,17 @@ begin
   MaxPriority:= AppEventsMaxPriorities[AEvent];
   if MaxPriority<0 then exit;
 
-  if Assigned(AEd) then
+  Frame:= nil;
+  SCurLexer:= '';
+  bNeedGroup:= false;
+  bCheckLexer:= Assigned(AEd) and (AEvent<>cEventOnLexer);
+
+  if bCheckLexer then
   begin
     Frame:= TGroupsHelper.GetEditorFrame(AEd);
     if Frame=nil then
     begin
+      bCheckLexer:= false;
       if not (AEvent in cTheseEventsDontRequireFrame) then
         exit;
     end
@@ -115,12 +121,6 @@ begin
       SCurLexer:= Frame.LexerName[AEd];
       bNeedGroup:= AEvent in cTheseEventsNeedGroupingUndo;
     end;
-  end
-  else
-  begin
-    Frame:= nil;
-    SCurLexer:= '';
-    bNeedGroup:= false;
   end;
 
   KeyForFilter:= '';
@@ -150,7 +150,9 @@ begin
         Plugin:= TAppEventInfo(AppEventList[NPlugin]);
         if not (AEvent in Plugin.ItemEvents) then Continue;
         if (NPriority<>Plugin.ItemEventsPrior[AEvent]) then Continue;
-        if not ((Plugin.ItemLexers='') or IsLexerListed(SCurLexer, Plugin.ItemLexers)) then Continue;
+
+        if bCheckLexer then
+          if not ((Plugin.ItemLexers='') or IsLexerListed(SCurLexer, Plugin.ItemLexers)) then Continue;
 
         //check that OnKey event is called for supported keys
         //don't allow empty KeyForFilter, it is empty for on_open_pre for filename w/o extension
@@ -388,12 +390,9 @@ begin
     SParam:= RegexParts[4].Str;
 
     if SParam<>'' then
-    begin
-      SetLength(FParamVars, 1);
-      FParamVars[0]:= AppVariant(SParam);
-    end
+      FParamVars:= [AppVariant(SParam)]
     else
-      SetLength(FParamVars, 0);
+      FParamVars:= nil;
 
     Result:= AppPython.RunCommand(SModule, SFunc, FParamVars);
     MsgLogConsole(Format(msgCallbackDeprecated, [ACallback]));
@@ -408,7 +407,6 @@ procedure TfmMain.DoPyResetPlugins;
 var
   fn, Cmd: string;
   L: TStringList;
-  Params: TAppVariantArray;
 begin
   if not AppPython.Inited then exit;
 
@@ -432,8 +430,7 @@ begin
   AppPython.ClearCache;
 
   //support on_start, issue #1253
-  SetLength(Params, 0);
-  DoPyEvent(nil, cEventOnStart, Params);
+  DoPyEvent(nil, cEventOnStart, []);
 end;
 
 procedure TfmMain.DoPyRescanPlugins;
@@ -451,12 +448,9 @@ begin
   if not AppPython.Inited then exit;
   if AppPython.LastCommandModule='' then exit;
   if AppPython.LastCommandParam<>'' then
-  begin
-    SetLength(Params, 1);
-    Params[0]:= AppVariant(AppPython.LastCommandParam);
-  end
+    Params:= [AppVariant(AppPython.LastCommandParam)]
   else
-    SetLength(Params, 0);
+    Params:= [];
 
   DoPyCommand(AppPython.LastCommandModule, AppPython.LastCommandMethod, Params, AInvoke);
 end;
@@ -467,7 +461,6 @@ var
   Timer: TTimer;
   SCallback, STag: string;
   NIndex: integer;
-  Params: TAppVariantArray;
 begin
   Timer:= Sender as TTimer;
   NIndex:= FListTimers.IndexOfObject(Timer);
@@ -480,12 +473,9 @@ begin
   SSplitByChar(FListTimers[NIndex], '|', SCallback, STag);
 
   //timer_proc callback must pass 'tag' as str!
-  SetLength(Params, 1);
-  Params[0]:= AppVariant(STag); //str
-
   DoPyCallbackFromAPI(
     SCallback,
-    Params,
+    [AppVariant(STag)],
     ['tag']
     );
 end;

@@ -134,7 +134,7 @@ begin
     begin
       Strings.LinesFoldFrom[Range^.Y, FEditorIndex]:= Range^.X;
       if Range^.Hint='' then
-        Range^.Hint:= Strings.LineSub(Range^.Y, Range^.X, cFoldedLenOfEmptyHint)+'...';
+        Range^.Hint:= Strings.LineSub(Range^.Y, Range^.X, ATEditorOptions.FoldedLenOfEmptyHint)+'...';
     end;
     cFoldFromEndOfLine:
     begin
@@ -279,20 +279,20 @@ begin
 
   //items "fold all", "unfold all"
   mi:= TMenuItem.Create(Self);
-  mi.Caption:= cStrMenuitemFoldAll;
+  mi.Caption:= ATEditorOptions.TextMenuitemFoldAll;
   mi.OnClick:= @MenuFoldFoldAllClick;
   mi.Enabled:= Fold.Count>0;
   Menu.Items.Add(mi);
 
   mi:= TMenuItem.Create(Self);
-  mi.Caption:= cStrMenuitemUnfoldAll;
+  mi.Caption:= ATEditorOptions.TextMenuitemUnfoldAll;
   mi.OnClick:= @MenuFoldUnfoldAllClick;
   mi.Enabled:= Fold.Count>0;
   Menu.Items.Add(mi);
 
   //submenu "fold level"
   miSub:= TMenuItem.Create(Self);
-  miSub.Caption:= cStrMenuitemFoldLevel;
+  miSub.Caption:= ATEditorOptions.TextMenuitemFoldLevel;
   miSub.Enabled:= Fold.Count>0;
   Menu.Items.Add(miSub);
 
@@ -345,8 +345,8 @@ begin
     mi.OnClick:= @MenuFoldPlusMinusClick;
 
     mi.Caption:=
-      cTextHintScrollPrefix+' '+Inttostr(Rng^.Y+1)+': '+
-      UTF8Encode(Strings.LineSub(Rng^.Y, 1, cFoldedLenOfEmptyHint));
+      ATEditorOptions.TextHintScrollPrefix+' '+IntToStr(Rng^.Y+1)+': '+
+      UTF8Encode(Strings.LineSub(Rng^.Y, 1, ATEditorOptions.FoldedLenOfEmptyHint));
 
     if Rng^.Folded then
       mi.ImageIndex:= 0
@@ -362,10 +362,10 @@ begin
   if FFoldImageList=nil then
   begin
     FFoldImageList:= TImageList.Create(Self);
-    FFoldImageList.Width:= cBitmapFoldPlus.Width;
-    FFoldImageList.Height:= cBitmapFoldPlus.Height;
-    FFoldImageList.Add(cBitmapFoldPlus, nil);
-    FFoldImageList.Add(cBitmapFoldMinus, nil);
+    FFoldImageList.Width:= ATEditorBitmaps.BitmapFoldPlus.Width;
+    FFoldImageList.Height:= ATEditorBitmaps.BitmapFoldPlus.Height;
+    FFoldImageList.Add(ATEditorBitmaps.BitmapFoldPlus, nil);
+    FFoldImageList.Add(ATEditorBitmaps.BitmapFoldMinus, nil);
   end;
 end;
 
@@ -453,7 +453,7 @@ begin
   NLine:= Carets[0].PosY;
   if not Strings.IsIndexValid(NLine) then exit;
 
-  NRange:= Fold.FindDeepestRangeContainingLine(NLine, false{AWithStaple});
+  NRange:= Fold.FindDeepestRangeContainingLine(NLine, false{AWithStaple}, FFoldIconForMinimalRange);
   if NRange<0 then exit;
   bFolded:= Fold.Items[NRange].Folded;
 

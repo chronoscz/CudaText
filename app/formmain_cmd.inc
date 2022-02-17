@@ -9,25 +9,34 @@ Copyright (c) Alexey Torgashin
 
 procedure TfmMain.TimerCmdTimer(Sender: TObject);
 var
-  Cmd: integer;
-  CmdInvoke: TATEditorCommandInvoke;
-  Frame: TEditorFrame;
   Ed: TATSynEdit;
+  CmdCode: integer;
+  CmdInvoke: TATEditorCommandInvoke;
+begin
+  TimerCmd.Enabled:= false;
+
+  repeat
+    case AppCommandGet(Ed, CmdCode, CmdInvoke) of
+      acgNoCommands:
+        Break;
+      acgBadCommand:
+        Continue;
+    end;
+
+    HandleTimerCommand(Ed, CmdCode, CmdInvoke);
+  until false;
+
+  UpdateStatusbar;
+end;
+
+
+procedure TfmMain.HandleTimerCommand(Ed: TATSynEdit; CmdCode: integer; CmdInvoke: TATEditorCommandInvoke);
+var
+  Frame: TEditorFrame;
   EdGrp: TATGroups;
   NIndex: integer;
   NColor: TColor;
-  Params: TAppVariantArray;
 begin
- TimerCmd.Enabled:= false;
-
- repeat
-  case AppCommandGet(Ed, Cmd, CmdInvoke) of
-    acgNoCommands:
-      Break;
-    acgBadCommand:
-      Continue;
-  end;
-
   Frame:= TGroupsHelper.GetEditorFrame(Ed);
 
   //support floating groups
@@ -36,23 +45,32 @@ begin
   else
     EdGrp:= Groups;
 
-  case Cmd of
+  case CmdCode of
 
     cmd_FileClose:
       begin
         EdGrp.CloseTabs(tabCloseCurrent, false);
         Frame:= CurrentFrame;
         if Assigned(Frame) then
-          Frame.SetFocus;
+          Frame.SetFocus
+        else
+        if FrameCount>0 then
+          TGroupsHelper.ForceFrameVisible(Frames[0])
+        else
+          raise Exception.Create('No frames left after "Close tab"');
       end;
 
     cmd_FileCloseAll:
       begin
-        //EdGrp.CloseTabs(tabCloseAll, false);
         DoCloseAllTabs;
         Frame:= CurrentFrame;
         if Assigned(Frame) then
-          Frame.SetFocus;
+          Frame.SetFocus
+        else
+        if FrameCount>0 then
+          TGroupsHelper.ForceFrameVisible(Frames[0])
+        else
+          raise Exception.Create('No frames left after "Close all tabs"');
       end;
 
     cmd_FileCloseOtherThis:
@@ -243,9 +261,11 @@ begin
       end;
 
     cmd_ToggleFindDialog:
-      DoToggleFindReplaceDialog(false);
+      DoDialogFind_Toggle(false, false);
+    cmd_ToggleFindDialog_AndFocus:
+      DoDialogFind_Toggle(false, true);
     cmd_ToggleReplaceDialog:
-      DoToggleFindReplaceDialog(true);
+      DoDialogFind_Toggle(true, false);
 
     cmd_ToggleSidebar:
       begin
@@ -671,24 +691,21 @@ begin
     cmd_HelpCheckUpdates:
       begin
         if UiOps.AllowProgramUpdates then
-        begin
-          SetLength(Params, 0);
-          DoPyCommand('cuda_addonman', 'check_cudatext_updates', Params, CmdInvoke);
-        end;
+          DoPyCommand('cuda_addonman', 'check_cudatext_updates', [], CmdInvoke);
       end;
 
     cmdFirstLexerCommand..
     cmdLastLexerCommand:
-      SetFrameLexerByIndex(Ed, Cmd-cmdFirstLexerCommand);
+      SetFrameLexerByIndex(Ed, CmdCode-cmdFirstLexerCommand);
 
     cmdFirstPluginCommand..
     cmdLastPluginCommand:
-      DoPyCommand_ByPluginIndex(Cmd-cmdFirstPluginCommand, CmdInvoke);
+      DoPyCommand_ByPluginIndex(CmdCode-cmdFirstPluginCommand, CmdInvoke);
 
     cmdFirstFileCommand..
     cmdLastFileCommand:
       begin
-        NIndex:= Cmd-cmdFirstFileCommand;
+        NIndex:= CmdCode-cmdFirstFileCommand;
         if NIndex<AppFrameList1.Count then
         begin
           Frame:= TEditorFrame(AppFrameList1[NIndex]);
@@ -700,22 +717,19 @@ begin
     cmdFirstRecentCommand..
     cmdLastRecentCommand:
       begin
-        NIndex:= Cmd-cmdFirstRecentCommand;
+        NIndex:= CmdCode-cmdFirstRecentCommand;
         if NIndex<AppListRecents.Count then
           DoFileOpen(AppListRecents[NIndex], '');
       end;
   end;
- until false;
-
- UpdateStatusbar;
 end;
+
 
 procedure TfmMain.FrameOnEditorCommand(Sender: TObject; ACommand: integer;
   AInvoke: TATEditorCommandInvoke; const AText: string; var AHandled: boolean);
 var
   Ed: TATSynEdit;
   Frame: TEditorFrame;
-  Params: TAppVariantArray;
   Str: string;
 begin
   AHandled:= true;
@@ -737,9 +751,7 @@ begin
   if (ACommand=cCommand_TextInsert) and
     (AText<>'') then
   begin
-    SetLength(Params, 1);
-    Params[0]:= AppVariant(AText);
-    if DoPyEvent(Ed, cEventOnInsert, Params).Val = evrFalse then
+    if DoPyEvent(Ed, cEventOnInsert, [AppVariant(AText)]).Val = evrFalse then
     begin
       AHandled:= true;
       exit
@@ -767,7 +779,9 @@ begin
 
     cmd_RepaintEditor:
       begin
-        Ed.Update;
+        //Ed.InvalidateEx is to fix repainting with cuda_sync_scroll with "renderer_anti_flicker":20;
+        //otherwise, Ed.Update is enough
+        Ed.InvalidateEx(true, false);
         AHandled:= true;
         exit
       end;

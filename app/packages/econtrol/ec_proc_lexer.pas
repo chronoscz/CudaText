@@ -12,15 +12,17 @@ unit ec_proc_lexer;
 interface
 
 uses
-  Classes, SysUtils,
-  ec_SyntAnal,
-  ATStringProc;
+  SysUtils, Classes,
+  ec_SyntAnal;
 
-function DoFindLexerForFilename(LexLib: TecSyntaxManager; FileName: string): TecSyntAnalyzer;
-function DoGetLexerFileFilter(an: TecSyntAnalyzer; const AllFilesText: string): string;
-function DoGetLexerDefaultExt(an: TecSyntAnalyzer): string;
+function Lexer_FindForFilename(LexLib: TecSyntaxManager; FileName: string): TecSyntAnalyzer;
+function Lexer_GetFileFilterString(an: TecSyntAnalyzer; const AllFilesText: string): string;
+function Lexer_GetDefaultExtension(an: TecSyntAnalyzer): string;
 
 implementation
+
+uses
+  ATStringProc;
 
 function SItemListed(const AItem, AList: string): boolean;
 const
@@ -41,7 +43,7 @@ Items are
   (before lexer HTML finds it)
 - full filename: "/name.ext" finds "any/dir/name.ext"
 }
-function DoFindLexerForFilename(LexLib: TecSyntaxManager; FileName: string): TecSyntAnalyzer;
+function Lexer_FindForFilename(LexLib: TecSyntaxManager; FileName: string): TecSyntAnalyzer;
 var
   An: TecSyntAnalyzer;
   fname, ext1, ext2: string;
@@ -97,7 +99,7 @@ begin
 end;
 
 
-function DoGetLexerFileFilter(an: TecSyntAnalyzer; const AllFilesText: string): string;
+function Lexer_GetFileFilterString(an: TecSyntAnalyzer; const AllFilesText: string): string;
 //Get filter-string for TSaveDialog:
 //- filter for given lexer
 //- and item "all files (*.*)"
@@ -111,20 +113,24 @@ begin
     L.LineBreak:= ' ';
     L.Text:= an.Extentions;
     if L.Count=0 then Exit;
-    Result:= an.LexerName+' ('+an.Extentions+')|';
+    Result:= an.LexerName+'|';
+
     for i:= 0 to L.Count-1 do
       if not SBeginsWith(L[i], '/') then //skip some for eg "Makefile" lexer
-        Result:= Result+('*.'+L[i]+';');
+        Result+= '*.'+L[i]+';';
+    if SEndsWith(Result, ';') then
+      SetLength(Result, Length(Result)-1);
+
     Result:= Result+'|';
   finally
     L.Free;
   end;
 
   if AllFilesText<>'' then
-    Result:= Result+(AllFilesText+'|'+AllFilesMask+'|');
+    Result+= AllFilesText+'|'+AllFilesMask+'|';
 end;
 
-function DoGetLexerDefaultExt(an: TecSyntAnalyzer): string;
+function Lexer_GetDefaultExtension(an: TecSyntAnalyzer): string;
 var
   n: integer;
 begin

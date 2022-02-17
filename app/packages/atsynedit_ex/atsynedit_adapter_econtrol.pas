@@ -119,7 +119,7 @@ type
     procedure __GetTokenAtPos(APos: TPoint; out APntFrom, APntTo: TPoint;
       out ATokenString, ATokenStyle: string; out ATokenKind: TATTokenKind);
     function GetTokenStyleAtPos(APos: TPoint): TecSyntaxFormat;
-    function GetTokenKindAtPos(APos: TPoint): TATTokenKind;
+    function GetTokenKindAtPos(APos: TPoint; ADocCommentIsAlsoComment: boolean=true): TATTokenKind;
     function GetTokenString(const token: PecSyntToken): string;
     procedure GetTokenProps(const token: PecSyntToken; out APntFrom, APntTo: TPoint;
       out ATokenString, ATokenStyle: string; out ATokenKind: TATTokenKind);
@@ -162,7 +162,7 @@ type
 procedure ApplyPartStyleFromEcontrolStyle(var part: TATLinePart; st: TecSyntaxFormat);
 
 function CodetreeFindItemForPosition(ATree: TTreeView; APosX, APosY: integer): TTreeNode;
-procedure CodetreeSelectItemForPosition(ATree: TTreeView; APosX, APosY: integer);
+procedure CodetreeSelectItemForPosition(ATree: TTreeView; APosX, APosY: integer; out ASelLine: integer);
 
 implementation
 
@@ -763,13 +763,20 @@ begin
   end;
 end;
 
-function TATAdapterEControl.GetTokenKindAtPos(APos: TPoint): TATTokenKind;
+function TATAdapterEControl.GetTokenKindAtPos(APos: TPoint;
+  ADocCommentIsAlsoComment: boolean): TATTokenKind;
 var
   Style: TecSyntaxFormat;
 begin
   Style:= GetTokenStyleAtPos(APos);
   if Assigned(Style) then
-    Result:= TATTokenKind(Style.TokenKind)
+  begin
+    Result:= TATTokenKind(Style.TokenKind);
+    //support 'documentation comments'
+    if (Result=atkComment) and (not ADocCommentIsAlsoComment) then
+      if Pos('doc', LowerCase(Style.DisplayName))>0 then
+        Result:= atkOther;
+  end
   else
     Result:= atkOther;
 end;
@@ -869,7 +876,7 @@ begin
       begin
         NameRule:= R.Rule.SyntOwner.LexerName;
         //must allow lexer name "PHP_" if main lexer is "PHP"
-        if NameRule[Length(NameRule)]='_' then
+        if NameRule='PHP_' then
           SetLength(NameRule, Length(NameRule)-1);
         if NameRule<>NameLexer then Continue;
       end;
@@ -1000,7 +1007,7 @@ function TATAdapterEControl.SublexerRangeProps(AIndex: integer;
   out AStart, AEnd: TPoint; out ALexerName: string): boolean;
 //this func must be guarded with CriSecForData.Enter/Leave
 var
-  Range: TecSubLexerRange;
+  Sub: PecSubLexerRange;
 begin
   Result:= false;
   AStart:= Point(0, 0);
@@ -1013,17 +1020,17 @@ begin
   Result:= (AIndex>=0) and (AIndex<SublexerRangeCount);
   if Result then
   begin
-    Range:= AnClient.PublicData.SublexRanges[AIndex];
-    if Range.Range.StartPos<0 then exit;
-    AStart:= Range.Range.PointStart;
-    AEnd:= Range.Range.PointEnd;
+    Sub:= AnClient.PublicData.SublexRanges.InternalGet(AIndex);
+    if Sub^.Range.StartPos<0 then exit;
+    AStart:= Sub^.Range.PointStart;
+    AEnd:= Sub^.Range.PointEnd;
 
     // before we had the Range.FinalSubAnalyzer:
     //if Assigned(Range.Rule) and Assigned(Range.Rule.SyntAnalyzer) then
     //  ALexerName:= Range.Rule.SyntAnalyzer.LexerName;
 
-    if Assigned(Range.FinalSubAnalyzer) then
-      ALexerName:= Range.FinalSubAnalyzer.LexerName;
+    if Assigned(Sub^.FinalSubAnalyzer) then
+      ALexerName:= Sub^.FinalSubAnalyzer.LexerName;
   end;
 end;
 
@@ -1033,31 +1040,43 @@ begin
 end;
 
 procedure TATAdapterEControl.UpdatePublicDataNeedTo;
+const
+  cMaxDistanceForEditors = 50;
 var
   Ed: TATSynEdit;
   NLine1, NLine2: integer;
 begin
-  if AnClient=nil then exit;
+  if AnClient=nil then exit; //raise Exception.Create('UpdatePublicDataNeedTo called with AnClient=nil');
   if EdList.Count=0 then exit;
 
   Ed:= TATSynEdit(EdList[0]);
+
+  //on the first file opening in CudaText, Ed.LineBottom gets 0 (because editor was not painted yet?)
+  //so we have the workaround which gets Ed.GetVisibleLines
   NLine1:= Ed.LineBottom+1;
+  if NLine1<2 then
+    NLine1:= Ed.LineTop+Ed.GetVisibleLines;
+
+  NLine2:= 0;
 
   if EdList.Count>1 then
   begin
     Ed:= TATSynEdit(EdList[1]);
     if Ed.Visible then
-      NLine2:= Ed.LineBottom+1
-    else
-      NLine2:= 0;
-  end
-  else
-    NLine2:= 0;
-
-  if (NLine2>0) and (Abs(NLine1-NLine2)<50) then
-  begin
-    NLine1:= Max(NLine1, NLine2);
-    NLine2:= NLine1;
+    begin
+      NLine2:= Ed.LineBottom+1;
+      if NLine2<2 then
+      begin
+        //seems we don't need the Ed.GetVisibleLines here?
+        NLine2:= 0;
+      end
+      else
+      if Abs(NLine1-NLine2)<cMaxDistanceForEditors then
+      begin
+        NLine1:= Max(NLine1, NLine2);
+        NLine2:= NLine1;
+      end;
+    end;
   end;
 
   AnClient.PublicDataNeedTo:= NLine1;
@@ -1113,15 +1132,23 @@ begin
 end;
 
 
-procedure CodetreeSelectItemForPosition(ATree: TTreeView; APosX, APosY: integer);
+procedure CodetreeSelectItemForPosition(ATree: TTreeView; APosX, APosY: integer; out ASelLine: integer);
 var
   Node: TTreeNode;
+  Range: TATRangeInCodeTree;
 begin
+  ASelLine:= -1;
   Node:= CodetreeFindItemForPosition(ATree, APosX, APosY);
   if Assigned(Node) then
   begin
     Node.MakeVisible;
     ATree.Selected:= Node;
+
+    if TObject(Node.Data) is TATRangeInCodeTree then
+    begin
+      Range:= TATRangeInCodeTree(Node.Data);
+      ASelLine:= Range.PosBegin.Y;
+    end;
   end;
 end;
 
@@ -1145,7 +1172,6 @@ begin
   if Assigned(AAnalizer) then
   begin
     UpdateBuffer(Buffer);
-    UpdatePublicDataNeedTo;
 
     AnClient:= TecClientSyntAnalyzer.Create(AAnalizer, Buffer);
     if EdList.Count>0 then
@@ -1154,6 +1180,9 @@ begin
     AnClient.OnProgressFirst:= @ProgressFirst;
     AnClient.OnProgressSecond:= @ProgressSecond;
     AnClient.OnProgressBoth:= @ProgressBoth;
+
+    //after AnClient assigning
+    UpdatePublicDataNeedTo;
   end;
 
   if Assigned(FOnLexerChange) then
@@ -1405,36 +1434,36 @@ procedure TATAdapterEControl.UpdateRangesSublex;
 //all calls of this proc must be guarded by CriSecForData.Enter/Leave
 var
   Ed: TATSynEdit;
-  R: TecSubLexerRange;
+  Sub: PecSubLexerRange;
   Style: TecSyntaxFormat;
-  Range: TATSortedRange;
+  NewSubRange: TATSortedRange;
   i: integer;
 begin
   for i:= 0 to AnClient.PublicData.SublexRanges.Count-1 do
   begin
     if Application.Terminated then exit;
 
-    R:= AnClient.PublicData.SublexRanges[i];
-    if R.Rule=nil then Continue;
-    if R.Range.StartPos<0 then Continue;
-    if R.Range.EndPos<0 then Continue;
+    Sub:= AnClient.PublicData.SublexRanges.InternalGet(i);
+    if Sub^.Rule=nil then Continue;
+    if Sub^.Range.StartPos<0 then Continue;
+    if Sub^.Range.EndPos<0 then Continue;
 
-    Style:= R.Rule.Style;
+    Style:= Sub^.Rule.Style;
     if Style=nil then Continue;
     if Style.BgColor<>clNone then
     begin
-      Range.Init(
-        R.Range.PointStart,
-        R.Range.PointEnd,
-        R.Range.PointStart,
-        R.Range.PointEnd,
+      NewSubRange.Init(
+        Sub^.Range.PointStart,
+        Sub^.Range.PointEnd,
+        Sub^.Range.PointStart,
+        Sub^.Range.PointEnd,
         -1,
         -1,
         Style.BgColor,
         nil,
         true
         );
-      FRangesSublexer.Add(Range);
+      FRangesSublexer.Add(NewSubRange);
     end;
   end;
 
@@ -1596,7 +1625,8 @@ end;
 function TATAdapterEControl.IsDataReadyPartially: boolean;
 begin
   if Assigned(AnClient) then
-    Result:= AnClient.PublicData.FinishedPartially
+    Result:= AnClient.PublicData.Finished or
+             AnClient.PublicData.FinishedPartially
   else
     Result:= true;
 end;

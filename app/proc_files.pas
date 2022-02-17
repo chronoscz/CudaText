@@ -30,6 +30,7 @@ function AppExpandFilename(const fn: string): string;
 procedure AppBrowseToFilenameInShell(const fn: string);
 function AppFileExtentionCreatable(const fn: string): boolean;
 procedure AppFileCheckForNullBytes(const fn: string);
+procedure AppMakeBackupFiles(const AFilename, AExtension: string; ACount: integer);
 
 
 implementation
@@ -90,11 +91,13 @@ function IsAsciiControlChar(n: integer): boolean; inline;
 const
   cAllowedControlChars: set of byte = [
     7, //Bell
-    9,
-    10,
-    13,
+    8, //Backspace
+    9, //Tab
+    10, //LF
     12, //FormFeed
-    26 //EOF
+    13, //CR
+    26, //EOF
+    27 //Escape
     ];
 begin
   Result:= (n < 32) and not (byte(n) in cAllowedControlChars);
@@ -331,7 +334,7 @@ begin
 
   fs:= TFileStream.Create(fn, fmOpenRead or fmShareDenyNone);
   try
-    FillChar(Buf, SizeOf(Buf), 0);
+    FillChar(Buf{%H-}, SizeOf(Buf), 0);
     NRead:= fs.Read(Buf, SizeOf(Buf));
     Result:= (NRead=SizeOf(Buf)) and
       (Buf[0]=#0) and
@@ -350,6 +353,26 @@ begin
     if MsgBox(Format(msgErrorNullBytesInFile, [fn]),
       MB_OKCANCEL or MB_ICONERROR) = ID_OK then
       DeleteFile(fn);
+end;
+
+procedure AppMakeBackupFiles(const AFilename, AExtension: string; ACount: integer);
+var
+  fnTemp, fnTemp2: string;
+  i: integer;
+begin
+  for i:= ACount downto 1 do
+  begin
+    fnTemp:= ChangeFileExt(AFilename, '.'+IntToStr(i)+AExtension);
+    if i>1 then
+      fnTemp2:= ChangeFileExt(AFilename, '.'+IntToStr(i-1)+AExtension)
+    else
+      fnTemp2:= AFilename;
+    if i>=ACount then
+      if FileExists(fnTemp) then
+        DeleteFile(fnTemp);
+    if FileExists(fnTemp2) then
+      RenameFile(fnTemp2, fnTemp);
+  end;
 end;
 
 end.

@@ -33,8 +33,10 @@ type
   private
     FList: TFPList;
     FOwnsObjects: boolean;
+    function CompProc(ItemIndex, Key: integer): integer;
     function GetCount: integer;
     function GetItem(Index: integer): TSortedItem;
+    function QuickSearch(Key: integer; var Index: integer): Boolean;
   public
     constructor Create(AOwnObjects: Boolean);
     destructor Destroy; override;
@@ -50,6 +52,7 @@ type
 
   { TRange }
 
+  PRange = ^TRange;
   TRange = packed record
     StartPos, EndPos: integer;
     PointStart, PointEnd: TPoint;
@@ -65,7 +68,10 @@ type
   private
     type PGRange = ^GRange;
   protected
-    function CompProc(const AValue: TRange; AKey: integer): integer;
+    function CompProc(AValuePtr: PRange; AKey: integer): integer;
+    // CompProcSofter returns 0 also when APos is at the range end
+    function CompProcSofter(AValuePtr: PRange; AKey: integer): integer;
+    function CompProcForLine(AValuePtr: PRange; ALine: integer): integer;
     function CompLines(AItemIndex, ALine: integer): integer;
   public
     constructor Create(UnionSiblings: Boolean = True);
@@ -83,6 +89,11 @@ type
     function PriorAtLine(ALine: integer): integer;
     // At position exactly, -1 if pos between tokens
     function FindAt(APos: integer): integer;
+    // FindSofter also allows APos to be exactly at the range end
+    function FindSofter(APos: integer): integer;
+    // First which has Y>=ALine
+    function FindFirstAtOrAfterLine(ALine: integer): integer;
+    function FindFirstContainingLine(ALine: integer): integer;
   end;
 
   TecRangeList = GRangeList<TRange>;
@@ -184,31 +195,54 @@ begin
    begin
      if Count > 0 then Result := 0
    end else
-   if TRange(InternalItems[Result]^).EndPos <= APos then
+   if PRange(InternalItems[Result])^.EndPos <= APos then
     if Result < Count - 1 then Inc(Result)
      else Result := -1;
 end;
 
-function GRangeList<GRange>.CompProc(const AValue: TRange; AKey: integer): integer;
+function GRangeList<GRange>.CompProc(AValuePtr: PRange; AKey: integer): integer;
 begin
-  if AValue.StartPos > AKey then
+  if AValuePtr^.StartPos > AKey then
     Result := 1
   else
-  if (AValue.StartPos <= AKey) and (AValue.EndPos > AKey) then
+  if AValuePtr^.EndPos > AKey then
     Result := 0
   else
     Result := -1;
 end;
 
+function GRangeList<GRange>.CompProcSofter(AValuePtr: PRange; AKey: integer): integer;
+begin
+  if AValuePtr^.StartPos > AKey then
+    Result := 1
+  else
+  if AValuePtr^.EndPos >= AKey then
+    Result := 0
+  else
+    Result := -1;
+end;
+
+function GRangeList<GRange>.CompProcForLine(AValuePtr: PRange; ALine: integer): integer;
+begin
+  if AValuePtr^.PointStart.Y > ALine then
+    Result := 1
+  else
+  if AValuePtr^.PointEnd.Y >= ALine then
+    Result := 0
+  else
+    Result := -1;
+end;
+
+
 function GRangeList<GRange>.CompLines(AItemIndex, ALine: integer): integer;
 var
-  Ptr: pointer;
+  Ptr: PRange;
   Y1, Y2: integer;
 begin
-  Ptr := InternalItems[AItemIndex];
+  Ptr := PRange(InternalItems[AItemIndex]);
   // support multi-line comments
-  Y1 := TRange(Ptr^).PointStart.Y;
-  Y2 := TRange(Ptr^).PointEnd.Y;
+  Y1 := Ptr^.PointStart.Y;
+  Y2 := Ptr^.PointEnd.Y;
   if Y1 = Y2 then
     Result := Y1 - ALine
   else
@@ -232,7 +266,7 @@ begin
   while Result <= H do
   begin
     I := (Result + H) shr 1;
-    Diff := CompProc(TRange(InternalItems[i]^), APos);
+    Diff := CompProc(InternalItems[i], APos);
     if Diff < 0 then
       Result := I + 1
     else
@@ -247,7 +281,7 @@ begin
     Result := NCount - 1
   else
   if Result > 0 then
-    if CompProc(TRange(InternalItems[i]^), APos) > 0 then
+    if CompProc(InternalItems[i], APos) > 0 then
       Dec(Result);
 end;
 
@@ -302,15 +336,98 @@ begin
   while L <= H do
   begin
     I := (L + H) shr 1;
-    Diff := CompProc(TRange(InternalItems[i]^), APos);
+    Diff := CompProc(InternalItems[I], APos);
     if Diff < 0 then
       L := I + 1
     else
+    if Diff = 0 then
+      Exit(I)
+    else
+      H := I - 1;
+  end;
+end;
+
+function GRangeList<GRange>.FindSofter(APos: integer): integer;
+var
+  L, H, I, Diff, NCount: Integer;
+begin
+  Result := -1;
+  NCount := Count;
+  if NCount = 0 then
+    Exit;
+
+  L := 0;
+  H := NCount - 1;
+  while L <= H do
+  begin
+    I := (L + H) shr 1;
+    Diff := CompProcSofter(InternalItems[I], APos);
+    if Diff < 0 then
+      L := I + 1
+    else
+    if Diff = 0 then
+      Exit(I)
+    else
+      H := I - 1;
+  end;
+end;
+
+function GRangeList<GRange>.FindFirstAtOrAfterLine(ALine: integer): integer;
+var
+  L, H, I, Diff, NCount: Integer;
+begin
+  Result := -1;
+  NCount := Count;
+  if NCount = 0 then
+    Exit;
+
+  L := 0;
+  H := NCount - 1;
+  while L <= H do
+  begin
+    I := (L + H) shr 1;
+    Diff := PRange(InternalItems[I])^.PointStart.Y - ALine;
+    if Diff < 0 then
+      L := I + 1
+    else
+    if Diff = 0 then
     begin
-      if Diff = 0 then
-        Exit(I);
+      Exit(I);
+    end
+    else
+    begin
+      Result := I;
       H := I - 1;
     end;
+  end;
+end;
+
+function GRangeList<GRange>.FindFirstContainingLine(ALine: integer): integer;
+var
+  L, H, I, Diff, NCount: Integer;
+begin
+  Result := -1;
+  NCount := Count;
+  if NCount = 0 then
+    Exit;
+
+  L := 0;
+  H := NCount - 1;
+  while L <= H do
+  begin
+    I := (L + H) shr 1;
+    Diff := CompProcForLine(InternalItems[I], ALine);
+    if Diff < 0 then
+      L := I + 1
+    else
+    if Diff = 0 then
+    begin
+      while (I > 0) and (CompProcForLine(InternalItems[I - 1], ALine) = 0) do
+        Dec(I);
+      Exit(I);
+    end
+    else
+      H := I - 1;
   end;
 end;
 
@@ -407,49 +524,49 @@ begin
   Result := TSortedItem(FList[Index]);
 end;
 
-function TSortedList.PriorAt(Pos: integer): integer;
+function TSortedList.CompProc(ItemIndex, Key: integer): integer; inline;
+begin
+  Result := TSortedItem(FList[ItemIndex]).GetKey - Key;
+end;
 
-  function CompProc(ItemIndex, Key: integer): integer; inline;
+function TSortedList.QuickSearch(Key: integer; var Index: integer): Boolean;
+var
+  L, H, I, C, NCount: Integer;
+begin
+  Result := False;
+  NCount := FList.Count;
+  if NCount = 0 then
   begin
-    Result := TSortedItem(FList[ItemIndex]).GetKey - Key;
+    Index := -1;
+    Exit;
   end;
 
-  function QuickSearch(Key: integer; var Index: integer): Boolean; inline;
-  var
-    L, H, I, C, NCount: Integer;
+  L := 0;
+  H := NCount - 1;
+  while L <= H do
   begin
-    Result := False;
-    NCount := FList.Count;
-    if NCount = 0 then
+    I := (L + H) shr 1;
+    C := CompProc(I, Key);
+    if C < 0 then L := I + 1 else
     begin
-      Index := -1;
-      Exit;
-    end;
-
-    L := 0;
-    H := NCount - 1;
-    while L <= H do
-    begin
-      I := (L + H) shr 1;
-      C := CompProc(I, Key);
-      if C < 0 then L := I + 1 else
+      if C = 0 then
       begin
-        if C = 0 then
-        begin
-          Result := True;
-          Index := I;
-          Exit;
-        end;
-        H := I - 1;
+        Result := True;
+        Index := I;
+        Exit;
       end;
+      H := I - 1;
     end;
-    Index := L;
-    if Index >= NCount then
-      Index := NCount - 1;
-    if Index >= 0 then
-      if CompProc(Index, Key) > 0 then
-        dec(Index);
   end;
+  Index := L;
+  if Index >= NCount then
+    Index := NCount - 1;
+  if Index >= 0 then
+    if CompProc(Index, Key) > 0 then
+      Dec(Index);
+end;
+
+function TSortedList.PriorAt(Pos: integer): integer;
 begin
   QuickSearch(Pos, Result);
 end;

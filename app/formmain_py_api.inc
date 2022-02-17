@@ -72,6 +72,7 @@ function PyHelper_EditorFromHandle(Handle: Int64): TATSynEdit;
 var
   Obj: TObject;
   nTab: Integer;
+  Frame: TEditorFrame;
 begin
   Result:= nil;
   if not Assigned(fmMain) then exit;
@@ -89,7 +90,21 @@ begin
 
   case Handle of
     0: //"ed"
-      Result:= fmMain.CurrentEditor;
+      begin
+        Result:= fmMain.CurrentEditor;
+        if Result=nil then
+        begin
+          if fmMain.FrameCount>0 then
+          begin
+            Frame:= fmMain.Frames[0];
+            TGroupsHelper.ForceFrameVisible(Frame);
+            Frame.SetFocus();
+            Result:= Frame.Ed1;
+          end
+          else
+            MsgLogConsole('ERROR: API "ed" is Nil, and no frames; report to author what you are doing');
+        end;
+      end;
 
     cPyEditorHandleMin..cPyEditorHandleMax:
       begin
@@ -338,7 +353,7 @@ begin
           'border_bottom',
           Ord(St.BorderTypeBottom),
           'styles',
-          PChar(FontStylesToString(St.Font.Style))
+          PChar(Lexer_FontStylesToString(St.Font.Style))
           ));
     end;
   end;
@@ -464,7 +479,7 @@ begin
         APP_DIR_PY:
           Result:= PyUnicodeFromString(AppDir_Py);
         APP_FILE_SESSION:
-          Result:= PyUnicodeFromString(fmMain.GetSessionFilename);
+          Result:= PyUnicodeFromString(AppFile_Session);
         APP_DIR_INSTALLED_ADDON:
           Result:= PyUnicodeFromString(AppDir_LastInstalledAddon);
         APP_FILE_RECENTS:
@@ -2222,7 +2237,6 @@ var
   Ed: TATSynEdit;
   Caret: TATCaretItem;
   PrevCharsLeft: integer;
-  Params: TAppVariantArray;
 begin
   AContent.Clear;
   ACharsLeft:= 0;
@@ -2238,8 +2252,7 @@ begin
      (Caret.PosY=FPyCompletionProps.CaretPos.Y) then
   begin
     PrevCharsLeft:= FPyCompletionProps.CharsLeft;
-    SetLength(Params, 0);
-    DoPyEvent(Ed, cEventOnComplete, Params);
+    DoPyEvent(Ed, cEventOnComplete, []);
 
     //this check- to close listbox when no more matches after typing too much
     //MsgStatus(Format('prev %d now %d', [PrevCharsLeft, FPyComplete_CharsLeft]));
@@ -2266,7 +2279,6 @@ procedure TfmMain.PyCompletionOnResult(Sender: TObject;
 var
   Sep: TATStringSeparator;
   StrLine, StrSnippet: string;
-  Params: TAppVariantArray;
   i: integer;
 begin
   //find index-th line
@@ -2282,11 +2294,11 @@ begin
 
   //ShowMessage('id: '+ASnippetId+#10+'text:'#10+StrSnippet);
 
-  SetLength(Params, 2);
-  Params[0]:= AppVariant(ASnippetId);
-  Params[1]:= AppVariant(StrSnippet);
-
-  DoPyEvent(FPyCompletionProps.Editor, cEventOnSnippet, Params);
+  DoPyEvent(FPyCompletionProps.Editor, cEventOnSnippet,
+    [
+    AppVariant(ASnippetId),
+    AppVariant(StrSnippet)
+    ]);
   FPyCompletionProps.Clear;
 end;
 
@@ -3012,6 +3024,7 @@ var
   Ada: TATAdapterEControl;
   Lex: TecSyntAnalyzer;
   Sep: TATStringSeparator;
+  CharSize: TATEditorCharSize;
 begin
   with AppPython.Engine do
     if Bool(PyArg_ParseTuple(Args, 'Lis:get_prop', @H, @Id, @Ptr)) then
@@ -3441,7 +3454,10 @@ begin
 
         PROP_CELL_SIZE:
           begin
-            Result:= Py_BuildValue('(ii)', Ed.TextCharSize.XScaled div ATEditorCharXScale, Ed.TextCharSize.Y);
+            CharSize:= Ed.TextCharSize;
+            Result:= Py_BuildValue('(ii)',
+                       integer(CharSize.XScaled div ATEditorCharXScale),
+                       integer(CharSize.Y));
           end;
 
         PROP_MODERN_SCROLLBAR:
@@ -3608,8 +3624,8 @@ begin
 
         PROP_CODETREE_MODIFIED_VERSION:
           begin
-            if Assigned(fmMain.FCodetreeForEditor) then
-              Result:= PyLong_FromLong(fmMain.FCodetreeForEditor.Strings.ModifiedVersion)
+            if Assigned(AppCodetreeState.Editor) then
+              Result:= PyLong_FromLong(AppCodetreeState.Editor.Strings.ModifiedVersion)
             else
               Result:= PyLong_FromLong(0);
           end;
@@ -3733,7 +3749,6 @@ var
   Pages, PagesTo: TATPages;
   NLocalGroup, NGlobalGroup, NTab, NIndexNew, N1, N2: integer;
   LineEnd: TATLineEnds;
-  Params: TAppVariantArray;
 begin
   with AppPython.Engine do
     if Bool(PyArg_ParseTuple(Args, 'Lis:set_prop', @H, @Id, @Ptr)) then
@@ -4006,8 +4021,7 @@ begin
               if NTab>=0 then
               begin
                 Pages.Tabs.MoveTab(NTab, NIndexNew, true);
-                SetLength(Params, 0);
-                fmMain.DoPyEvent(Ed, cEventOnTabMove, Params);
+                fmMain.DoPyEvent(Ed, cEventOnTabMove, []);
               end;
             end;
           end;
@@ -4564,9 +4578,9 @@ var
   StrCaption, StrId, StrFilename, StrCmd, StrIndex: string;
   SplitVert, SplitVisible, ok: boolean;
   SplitPos, SplitTotal: integer;
+  Params: TAppVariantArray;
   ParamBool: boolean;
   ParamRect: TRect;
-  Params: TAppVariantArray;
   Num64: Int64;
   Pnt: TPoint;
   Sep: TATStringSeparator;
@@ -4615,7 +4629,18 @@ begin
 
         APP_PROC_SAVE_SESSION:
           begin
-            ParamBool:= fmMain.DoOps_SaveSession(Str, true, false);
+            SSplitByChar(Str, ';', Str1, Str2);
+
+            //do session backups, when Auto Save plugin saves _default_ session
+            if IsDefaultSession(Str1) then
+              fmMain.DoOps_SaveSessionsBackups(Str1);
+
+            ParamBool:= fmMain.DoOps_SaveSession(
+              Str1,
+              Pos('n', Str2)=0, //ASaveModifiedFiles
+              Pos('u', Str2)=0, //ASaveUntitlesTabs
+              Pos('t', Str2)>0 //AByTimer
+              );
             Result:= PyBool_FromLong(Ord(ParamBool));
           end;
 
@@ -4694,12 +4719,9 @@ begin
             Sep.GetItemStr(Str2);
             Sep.GetItemStr(Str3);
             if Str3<>'' then
-            begin
-              SetLength(Params, 1);
-              Params[0]:= AppVariant(Str3);
-            end
+              Params:= [AppVariant(Str3)]
             else
-              SetLength(Params, 0);
+              Params:= [];
 
             fmMain.DoPyCommand(Str1, Str2, Params, cInvokeAppAPI);
             Result:= ReturnNone;
@@ -5247,14 +5269,16 @@ begin
 
         APP_PROC_CONFIG_SCALE_GET:
           begin
-            Result:= Py_BuildValue('(ii)', UiOps.Scale, UiOps.ScaleFont);
+            Result:= Py_BuildValue('(ii)',
+                       ATEditorScalePercents,
+                       ATEditorScaleFontPercents);
           end;
 
         APP_PROC_CONFIG_SCALE_SET:
           begin
             Sep.Init(Str);
-            Sep.GetItemInt(UiOps.Scale, 100, 80, 500);
-            Sep.GetItemInt(UiOps.ScaleFont, 100, 80, 500);
+            Sep.GetItemInt(ATEditorScalePercents, 100, 80, 500);
+            Sep.GetItemInt(ATEditorScaleFontPercents, 100, 80, 500);
             fmMain.DoApplyUiOps;
             Result:= ReturnNone;
           end;
@@ -5446,7 +5470,7 @@ begin
           'tkind',
           PChar(cPyTokenKind[TATTokenKind(Fmt.TokenKind)]),
           'styles',
-          PChar(FontStylesToString(Fmt.Font.Style))
+          PChar(Lexer_FontStylesToString(Fmt.Font.Style))
           ));
     end;
   end;
@@ -5507,15 +5531,15 @@ begin
 
         LEXER_DETECT:
           begin
-            if Assigned(fmMain.LexersDetected) then
-              fmMain.LexersDetected.Clear
+            if Assigned(AppLexersLastDetected) then
+              AppLexersLastDetected.Clear
             else
-              fmMain.LexersDetected:= TStringList.Create;
+              AppLexersLastDetected:= TStringList.Create;
 
-            DoLexerDetect(StrValue, Lexer, LexerLite, SName, @fmMain.DoPyLexerDetection);
+            Lexer_DetectByFilename(StrValue, Lexer, LexerLite, SName, @fmMain.DoPyLexerDetection);
 
-            if fmMain.LexersDetected.Count>0 then
-              Result:= StringsToPyTuple(fmMain.LexersDetected)
+            if AppLexersLastDetected.Count>0 then
+              Result:= StringsToPyTuple(AppLexersLastDetected)
             else
             if SName<>'' then
               Result:= PyUnicodeFromString(SName)
@@ -5526,9 +5550,10 @@ begin
         LEXER_GET_LEXERS:
           begin
             List:= TStringList.Create;
+            List.UseLocale:= false;
             List.Sorted:= true;
             try
-              DoLexerEnum(List, AppStrToBool(StrValue));
+              Lexer_EnumAll(List, AppStrToBool(StrValue));
               Result:= StringsToPyList(List);
             finally
               FreeAndNil(List);
@@ -9849,7 +9874,7 @@ begin
   Result:= -1;
   if not AppPython.Inited then exit;
 
-  with TIniFile.Create(GetAppLangFilename) do
+  with TIniFile.Create(AppFile_Language) do
   try
     SCaption:= ReadString('d_about', '_clr', 'Colors');
   finally

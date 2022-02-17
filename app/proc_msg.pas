@@ -17,8 +17,8 @@ uses
   ATSynEdit;
 
 const
-  cAppExeVersion = '1.152.0.2';
-  cAppApiVersion = 414;
+  cAppExeVersion = '1.156.0.2';
+  cAppApiVersion = 415;
 
 const
   cOptionSystemSuffix =
@@ -67,8 +67,8 @@ const
   msgErrorNullBytesInFile = 'Config file is broken, because its leading bytes are NULLs:'#10'%s'#10'Press OK to delete it.';
 
   msgCmdPaletteCaption: string = 'Command palette';
-  msgCmdPaletteTextHint = 'F9: set hotkey; input "@hotkey": search';
-  msgCmdPalettePrefixHelp = '#p – plugins'+EOL+'#l – lexers'+EOL+'#f – opened files'+EOL+'#r – recent files';
+  msgCmdPaletteTextHint: string = 'F9: set hotkey; input "@hotkey": search';
+  msgCmdPalettePrefixHelp: string = '#p – plugins'+EOL+'#l – lexers'+EOL+'#f – opened files'+EOL+'#r – recent files';
 
   msgErrorPluginIgnored = 'NOTE: Plugin %s is in ignore-list, please remove it';
   msgErrorTooManyFileTabs = 'NOTE: Too many editor-tabs are opened, cannot add tab';
@@ -206,6 +206,7 @@ const
   msgCannotHandleUntitledTab: string = 'Cannot handle the untitled document';
   msgCannotFindLexerInLibrary: string = 'Cannot find lexer in library:';
   msgCannotFindLexerFile: string = 'Cannot find lexer file:';
+  msgCannotLoadLexerFile: string = 'Cannot load lexer file:';
   msgCannotFindSublexerInLibrary: string = 'Cannot find linked sublexer:';
   msgCannotFindWithoutCaret: string = 'Cannot find/replace without caret';
   msgCannotCreateDir: string = 'Cannot create folder:';
@@ -238,7 +239,7 @@ const
   msgStatusbarTextCarets: string = 'carets';
 
   msgStatusbarWrapStates: array[0..Ord(High(TATEditorWrapMode))] of string =
-    ('no wrap', 'wrap', 'margin', 'wnd/mrg');
+    ('no wrap', 'wrap', 'margin');
 
   msgStatusbarHintCaret: string = 'Caret position, selection';
   msgStatusbarHintEnc: string = 'File encoding';

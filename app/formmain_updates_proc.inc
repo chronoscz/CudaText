@@ -366,7 +366,7 @@ begin
   end;
 
   if AndHeight then
-    Form.Height:= AppScale(UiOps.ListboxSizeY);
+    Form.Height:= ATEditorScale(UiOps.ListboxSizeY);
 end;
 
 
@@ -486,7 +486,7 @@ var
   id: TAppPanelId;
 begin
   Self.Font.Name:= UiOps.VarFontName;
-  Self.Font.Size:= AppScaleFont(UiOps.VarFontSize);
+  Self.Font.Size:= ATEditorScaleFont(UiOps.VarFontSize);
   Self.Font.Color:= GetAppColor(apclTabFont);
 
   Groups.SetTabFont(Self.Font);
@@ -501,7 +501,7 @@ begin
 
   //dont set font for PanelLeft/PanelBottom, id effects
   CodeTree.Tree.Font.Name:= UiOps.VarFontName;
-  CodeTree.Tree.Font.Size:= AppScaleFont(UiOps.VarFontSize);
+  CodeTree.Tree.Font.Size:= ATEditorScaleFont(UiOps.VarFontSize);
 
   CodeTreeFilterInput.Font.Name:= EditorOps.OpFontName;
   CodeTreeFilterInput.Font.Size:= EditorOps.OpFontSize;
@@ -511,13 +511,13 @@ begin
       with AppPanels[id] do
       begin
         PanelTitle.Font.Name:= UiOps.VarFontName;
-        PanelTitle.Font.Size:= AppScaleFont(UiOps.VarFontSize);
+        PanelTitle.Font.Size:= ATEditorScaleFont(UiOps.VarFontSize);
       end;
 
   ATFlatTheme.FontName:= UiOps.VarFontName;
   ATFlatTheme.FontSize:= UiOps.VarFontSize;
-  ATFlatTheme.ScalePercents:= UiOps.Scale;
-  ATFlatTheme.ScaleFontPercents:= UiOps.ScaleFont;
+  ATFlatTheme.ScalePercents:= ATEditorScalePercents;
+  ATFlatTheme.ScaleFontPercents:= ATEditorScaleFontPercents;
 
   if Assigned(fmFind) then
     fmFind.UpdateFonts;
@@ -528,7 +528,7 @@ end;
 procedure TfmMain.DoApplyFont_UiStatusbar;
 begin
   UpdateThemeStatusbar;
-  Status.HeightInitial:= Max(UiOps.StatusHeightMin, AppScale(AppThemeStatusbar.FontSize * UiOps.StatusHeightPercents div 100));
+  Status.HeightInitial:= Max(UiOps.StatusHeightMin, ATEditorScale(AppThemeStatusbar.FontSize * UiOps.StatusHeightPercents div 100));
   Status.Height:= Status.HeightInitial;
 end;
 
@@ -585,7 +585,7 @@ begin
   if Frame=nil then exit;
   //if Frame.FrameKind<>efkEditor then exit;
 
-  SFileName:= Frame.GetFileName(Ed);
+  SFileName:= Ed.FileName;
   if SFileName='' then exit;
 
   Frame.DoSaveHistory(Ed);
@@ -1017,6 +1017,7 @@ var
   Frame: TEditorFrame;
   Ed: TATSynEdit;
   Ada: TATAdapterEControl;
+  bLiteLexer: boolean;
 begin
   if AConsiderTreeVisible then
     if not AppPanels[cPaneSide].Visible then exit;
@@ -1024,12 +1025,18 @@ begin
   Frame:= CurrentFrame;
   if Frame=nil then exit;
   Ed:= Frame.Editor;
+  bLiteLexer:= Ed.AdapterForHilite is TATLiteLexer;
 
-  Ada:= Frame.Adapter[Ed];
-  if (Ada=nil) or (Ada.AnClient=nil) then
+  if bLiteLexer then
+    Ada:= nil
+  else
   begin
-    DoCodetree_Clear;
-    exit
+    Ada:= Frame.Adapter[Ed];
+    if (Ada=nil) or (Ada.AnClient=nil) then
+    begin
+      DoCodetree_Clear;
+      exit
+    end;
   end;
 
   if not Frame.EnabledCodeTree[Ed] then
@@ -1048,11 +1055,12 @@ begin
   end;
   }
 
-  while Ada.TreeBusy do
-  begin
-    Application.ProcessMessages;
-    if Application.Terminated then exit;
-  end;
+  if Assigned(Ada) then
+    while Ada.TreeBusy do
+    begin
+      Application.ProcessMessages;
+      if Application.Terminated then exit;
+    end;
 
   if AFill then
   begin
@@ -1064,7 +1072,8 @@ begin
       FCodetreeBuffer:= TTreeView.Create(Self);
 
     if not RunTreeHelper(Frame, FCodetreeBuffer) then
-      Ada.TreeFill(FCodetreeBuffer);
+      if Assigned(Ada) then
+        Ada.TreeFill(FCodetreeBuffer);
 
     if FCodetreeBuffer.Items.Count>0 then
       DoTreeviewCopy(FCodetreeBuffer, Frame.CachedTreeview[Ed]);
@@ -1076,7 +1085,7 @@ begin
     DoTreeviewCopy(FCodetreeBuffer, CodeTree.Tree);
 
     //force update scrollbar
-    CodeTree.Tree.Font.Size:= AppScaleFont(UiOps.VarFontSize);
+    CodeTree.Tree.Font.Size:= ATEditorScaleFont(UiOps.VarFontSize);
     CodeTree.Tree.Perform(CM_CHANGED, 0, 0);
 
     DoCodetree_UpdateVersion(Ed);
@@ -1090,6 +1099,7 @@ end;
 procedure TfmMain.UpdateTreeSelection(Frame: TEditorFrame; Ed: TATSynEdit);
 var
   Caret: TATCaretItem;
+  NSelLine: integer;
 begin
   if not UiOps.TreeAutoSync then exit;
 
@@ -1098,10 +1108,19 @@ begin
 
   CodetreeSelectItemForPosition(
     CodeTree.Tree,
-    Caret.PosX, Caret.PosY
+    Caret.PosX,
+    Caret.PosY,
+    NSelLine
     );
 
-  DoPyEvent_AppState(APPSTATE_CODETREE_SET_SELECTION);
+  if (AppCodetreeState.SelLine<>NSelLine) or
+    (AppCodetreeState.Editor<>Ed) then
+  begin
+    AppCodetreeState.Editor:= Ed;
+    AppCodetreeState.SelLine:= NSelLine;
+    if AppCodetreeState.SelLine>=0 then
+      DoPyEvent_AppState(APPSTATE_CODETREE_SET_SELECTION);
+  end;
 end;
 
 procedure TfmMain.UpdateMenuEnc(AMenu: TMenuItem);
@@ -1543,9 +1562,9 @@ begin
     PopupTree.Items.Add(mnuTreeSorted);
   end;
 
-  mnuTreeFoldAll.Caption:= cStrMenuitemFoldAll;
-  mnuTreeUnfoldAll.Caption:= cStrMenuitemUnfoldAll;
-  mnuTreeFoldLevel.Caption:= cStrMenuitemFoldLevel;
+  mnuTreeFoldAll.Caption:= ATEditorOptions.TextMenuitemFoldAll;
+  mnuTreeUnfoldAll.Caption:= ATEditorOptions.TextMenuitemUnfoldAll;
+  mnuTreeFoldLevel.Caption:= ATEditorOptions.TextMenuitemFoldLevel;
   mnuTreeSorted.Caption:= msgTreeSorted;
 
   mnuTreeSorted.Checked:= CodeTree.Tree.SortType<>stNone;

@@ -100,6 +100,7 @@ var
   bAtLineEnd, bAtFileEnd, bAtEmptyLine,
   bBlockWithEol, bUseBlockFinalEol: boolean;
   BlockOriginalLineCount: integer;
+  NDeleteLen: integer;
 begin
   AShift.X:= 0;
   AShift.Y:= 0;
@@ -142,8 +143,14 @@ begin
     StrTail:= '';
   end;
 
-  if AOverwrite then
-    Delete(StrTail, 1, Length(AText));
+  if AOverwrite and (StrTail<>'') then
+  begin
+    NDeleteLen:= Length(AText);
+    //if we type over emoji - delete 2 surrogate chars
+    if IsCharSurrogateHigh(StrTail[1]) then
+      Inc(NDeleteLen);
+    Delete(StrTail, 1, NDeleteLen);
+  end;
 
   //------------------
   //Insert single line
@@ -254,7 +261,10 @@ begin
   end;
 end;
 
-procedure TATStrings.TextDeleteLeft(AX, AY: integer; ALen: integer; out AShift, APosAfter: TPoint; AllowGoToPrevLine: boolean);
+procedure TATStrings.TextDeleteLeft(AX, AY: integer; ALen: integer;
+  out AShift, APosAfter: TPoint;
+  AllowGoToPrevLine: boolean;
+  out ATextChanged: boolean);
 var
   Str, StrPrev: atString;
 begin
@@ -262,7 +272,10 @@ begin
   AShift.Y:= 0;
   APosAfter.X:= AX;
   APosAfter.Y:= AY;
+  ATextChanged:= false;
   if not IsIndexValid(AY) then Exit;
+
+  ATextChanged:= true;
   Str:= Lines[AY];
 
   BeginUndoGroup;
@@ -289,11 +302,13 @@ begin
 
     if AX>0 then
     begin
-      if AX<=Length(Str) then
+      if AX-ALen<Length(Str) then
       begin
         System.Delete(Str, Max(1, AX+1-ALen), ALen);
         Lines[AY]:= Str;
-      end;
+      end
+      else
+        ATextChanged:= false;
       AShift.X:= -Min(AX, ALen);
       APosAfter.X:= Max(0, AX-ALen);
     end
@@ -307,12 +322,15 @@ begin
       //  nil);
 
       StrPrev:= Lines[AY-1];
-      Lines[AY-1]:= StrPrev+Str;
+      if Str<>'' then
+        Lines[AY-1]:= StrPrev+Str;
       LineDelete(AY);
       AShift.Y:= -1;
       APosAfter.X:= Length(StrPrev);
       APosAfter.Y:= AY-1;
-    end;
+    end
+    else
+      ATextChanged:= false;
 
   finally
     EndUndoGroup;

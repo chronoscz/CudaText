@@ -20,6 +20,7 @@ uses
   ATStringProc,
   ATCanvasPrimitives,
   ATSynEdit,
+  ATSynEdit_Options,
   ATSynEdit_Carets,
   ATSynEdit_Edits,
   ATSynEdit_Commands,
@@ -97,6 +98,7 @@ type
   TAppFinderOperationEvent = procedure(Sender: TObject; Op: TAppFinderOperation) of object;
   TAppFinderGetEditor = procedure(out AEditor: TATSynEdit) of object;
   TAppFinderShowMatchesCount = procedure(AMatchCount, ATime: integer) of object;
+  TAppFinderKeyDownEvent = function(AKey: word; AShiftState: TShiftState): boolean of object;
 
 function AppFinderOperationFromString(const Str: string): TAppFinderOperation;
 
@@ -200,6 +202,7 @@ type
     FOnGetMainEditor: TAppFinderGetEditor;
     FOnGetToken: TATFinderGetToken;
     FOnShowMatchesCount: TAppFinderShowMatchesCount;
+    FOnHandleKeyDown: TAppFinderKeyDownEvent;
     FLexerRegexThemed: boolean;
     Adapter: TATAdapterEControl;
     AdapterActive: boolean;
@@ -242,6 +245,7 @@ type
     property OnGetMainEditor: TAppFinderGetEditor read FOnGetMainEditor write FOnGetMainEditor;
     property OnGetToken: TATFinderGetToken read FOnGetToken write FOnGetToken;
     property OnShowMatchesCount: TAppFinderShowMatchesCount read FOnShowMatchesCount write FOnShowMatchesCount;
+    property OnHandleKeyDown: TAppFinderKeyDownEvent read FOnHandleKeyDown write FOnHandleKeyDown;
     property IsReplace: boolean read FReplace write SetReplace;
     property IsMultiLine: boolean read FMultiLine write SetMultiLine;
     property IsNarrow: boolean read FNarrow write SetNarrow;
@@ -381,7 +385,7 @@ begin
   SCaptionRepAll:= 'Replace all';
   SCaptionRepGlobal:= 'Replace global';
 
-  fn:= GetAppLangFilename;
+  fn:= AppFile_Language;
   if FileExists(fn) then
   begin
     ini:= TIniFile.Create(fn);
@@ -813,7 +817,7 @@ procedure TfmFind.UpdateFonts;
     Ed.Font.Size:= EditorOps.OpFontSize;
     Ed.Font.Quality:= EditorOps.OpFontQuality;
     Ed.OptBorderFocusedActive:= EditorOps.OpActiveBorderInControls;
-    Ed.OptBorderWidthFocused:= AppScale(EditorOps.OpActiveBorderWidth);
+    Ed.OptBorderWidthFocused:= ATEditorScale(EditorOps.OpActiveBorderWidth);
     EditorApplyTheme(Ed);
     Ed.Update;
   end;
@@ -918,9 +922,8 @@ begin
 
   if Str=UiOps.HotkeyFindDialog then
   begin
-    if not IsReplace then
-      DoFocusEditor
-    else
+    //ST4 and VSCode both stay in the Find dlg on pressing Ctrl+F
+    if IsReplace then
     begin
       IsReplace:= false;
       UpdateState(true);
@@ -931,9 +934,8 @@ begin
 
   if Str=UiOps.HotkeyReplaceDialog then
   begin
-    if IsReplace then
-      DoFocusEditor
-    else
+    //ST4 and VSCode both stay in the Replace dlg on pressing Ctrl+H
+    if not IsReplace then
     begin
       IsReplace:= true;
       UpdateState(true);
@@ -1061,6 +1063,10 @@ begin
     key:= 0;
     exit
   end;
+
+  if Assigned(FOnHandleKeyDown) then
+    if FOnHandleKeyDown(Key, Shift) then
+      Key:= 0;
 end;
 
 function BtnSize(C: TControl): integer;
@@ -1309,7 +1315,7 @@ var
   Ed: TATSynEdit;
   bEnabled: boolean;
 begin
-  cPadding:= AppScale(4);
+  cPadding:= ATEditorScale(4);
   bEnabled:= Self.Enabled;
 
   PanelTop.Visible:= IsNarrow;
@@ -1423,7 +1429,7 @@ var
   fn: string;
   ini: TIniFile;
 begin
-  fn:= GetAppLangFilename;
+  fn:= AppFile_Language;
   if FileExists(fn) then
   begin
     ini:= TIniFile.Create(fn);

@@ -101,13 +101,6 @@ const
 const
   BoolToPlusMinusOne: array[boolean] of integer = (-1, 1);
 
-var
-  EditorScalePercents: integer = 100;
-  EditorScaleFontPercents: integer = 0; //if 0, it follows previous variable
-
-function EditorScale(AValue: integer): integer; inline;
-function EditorScaleFont(AValue: integer): integer;
-
 type
   TATStringTabCalcEvent = function(Sender: TObject; ALineIndex, ACharIndex: integer): integer of object;
   TATStringGetLenEvent = function(ALineIndex: integer): integer of object;
@@ -211,15 +204,7 @@ procedure SAddStringToHistory(const S: string; List: TStrings; MaxItems: integer
 
 procedure TrimStringList(L: TStringList); inline;
 
-const
-  cDefaultNonWordChars: UnicodeString = '-+*=/\()[]{}<>"''.,:;~?!@#$%^&|`…';
-
-type
-  TATDecodeRec = record SFrom, STo: UnicodeString; end;
-function SDecodeRecords(const S: UnicodeString; const Decode: array of TATDecodeRec): UnicodeString;
-
 procedure SReplaceAll(var S: string; const SFrom, STo: string); inline;
-procedure SReplaceAllPercentChars(var S: string);
 procedure SDeleteFrom(var s: string; const SFrom: string); inline;
 procedure SDeleteFrom(var s: UnicodeString; const SFrom: UnicodeString); inline;
 procedure SDeleteFromEol(var S: string);
@@ -262,6 +247,9 @@ begin
   Result := CharCategoryArray[Ord(ch)] and 128 <> 0;
   if not Result then
   begin
+    if Ord(ch)<=32 then
+      exit(false);
+
     if IsCharUnicodeSpace(ch) then
       exit(false);
 
@@ -1164,46 +1152,9 @@ begin
 end;
 
 
-function SDecodeRecords(const S: UnicodeString; const Decode: array of TATDecodeRec): UnicodeString;
-var
-  DoDecode: Boolean;
-  i, iPart: integer;
-begin
-  Result := '';
-  i := 1;
-  repeat
-    if i > Length(S) then Break;
-    DoDecode := False;
-    for iPart := Low(Decode) to High(Decode) do
-      with Decode[iPart] do
-        if strlcomp(PChar(SFrom), @S[i], Length(SFrom)) = 0 then
-        begin
-          DoDecode := True;
-          Result := Result + STo;
-          Inc(i, Length(SFrom));
-          Break
-        end;
-    if DoDecode then Continue;
-    Result := Result + S[i];
-    Inc(i);
-  until False;
-end;
-
-
 procedure SReplaceAll(var S: string; const SFrom, STo: string);
 begin
   S:= StringReplace(S, SFrom, STo, [rfReplaceAll]);
-end;
-
-procedure SReplaceAllPercentChars(var S: string);
-var
-  i: Integer;
-begin
-  for i:= $20 to $2F do
-    SReplaceAll(S, '%'+IntToHex(i, 2), Chr(i));
-
-  i:= $7C;
-  SReplaceAll(S, '%'+IntToHex(i, 2), Chr(i));
 end;
 
 procedure SDeleteFrom(var s: string; const SFrom: string);
@@ -1306,20 +1257,6 @@ begin
   for i:= 1 to Length(S) do
     if S[i]=ch then
       Inc(Result);
-end;
-
-
-function EditorScale(AValue: integer): integer;
-begin
-  Result:= AValue * EditorScalePercents div 100;
-end;
-
-function EditorScaleFont(AValue: integer): integer;
-begin
-  if EditorScaleFontPercents=0 then
-    Result:= EditorScale(AValue)
-  else
-    Result:= AValue * EditorScaleFontPercents div 100;
 end;
 
 

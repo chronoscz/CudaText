@@ -367,6 +367,13 @@ var
     repeat
       if AFoundPos>=BufSize then exit;
 
+      if (AFoundPos>0) and (AFoundPos mod TATEditorOptions.ProgressLoadChars = 0) then
+      begin
+        FProgressValue:= Int64(AFoundPos)*100 div NStreamSize;
+        if Assigned(FOnProgress) then
+          FOnProgress(Self);
+      end;
+
       case _GetBufferEnding(Buf, AFoundPos, FEncoding) of
         cCharNotEnding:
           begin
@@ -392,28 +399,36 @@ var
   //------
   procedure _LoadItems;
   var
-    Len, NStart, NEnd, NCounted: integer;
+    Len, NStart, NEnd: integer;
+    //NPrevProgressPos: integer;
     LineEnd: TATLineEnds;
     SA, SUtf8: string;
     SWide: UnicodeString;
     SQuad: UCS4String;
   begin
     NStart:= 0;
-    NCounted:= 0;
+    //NPrevProgressPos:= 0;
+
+    FProgressKind:= cStringsProgressLoading;
+    FProgressValue:= 0;
+
     repeat
       _FindNextEol(NStart, NEnd, LineEnd);
       Len:= NEnd-NStart;
 
+      {
       //call OnProgress each 1M chars
       //it's smooth enough progress, on 280Mb log, 10 seconds
-      if NStart-NCounted>cStringsProgressLoadChars then
+      //2022.01: not needed now, because we call OnProgress in _FindNextEol
+
+      if NStart-NPrevProgressPos>TATEditorOptions.ProgressLoadChars then
       begin
-        NCounted:= NStart;
-        FProgressKind:= cStringsProgressLoading;
+        NPrevProgressPos:= NStart;
         FProgressValue:= Int64(NStart)*100 div NStreamSize;
         if Assigned(FOnProgress) then
           FOnProgress(Self);
       end;
+      }
 
       if LineEnd=cEndWin then
         Inc(NEnd, CharSize*2)
@@ -491,7 +506,7 @@ begin
     FEncoding:= cEncUTF8;
   end
   else
-  if NStreamSize>(cMaxFileSizeMbToDetectEncoding*1024*1024) then
+  if NStreamSize>ATEditorOptions.MaxFileSizeMbToDetectEncoding*1024*1024 then
   begin
     //detect encoding by signature, even for huge files
     DetectStreamEncoding(Stream, FEncoding, FEncodingCodepage, NSignatureLen, bWithBom,
@@ -511,8 +526,8 @@ begin
     else
       FEncoding:= cEncAnsi;
     DetectStreamEncoding(Stream, FEncoding, FEncodingCodepage, NSignatureLen, bWithBom,
-      GlobalDetectUtf8BufferKb,
-      GlobalDetectUf16BufferWords);
+      ATEditorOptions.DetectUtf8BufferKb,
+      ATEditorOptions.DetectUf16BufferWords);
   end
   else
   begin
