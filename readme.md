@@ -1,3 +1,10 @@
+This is Ubuntu snap package fork of https://github.com/Alexey-T/CudaText
+
+Snap store link: https://snapcraft.io/cudatext
+
+All requires packages directly included in the Lazarus project.
+
+
 CudaText - open source and cross-platform text editor.
 Written in Lazarus 2.0, Free Pascal 3.2.0.
 
