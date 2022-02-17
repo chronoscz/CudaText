@@ -24,12 +24,19 @@ begin
 
   //special handle for spec keys
   case Key of
-    VK_SHIFT,
     VK_CONTROL,
+    VK_LWIN,
+    VK_RWIN:
+      begin
+        if FMouseDragDropping then
+          UpdateCursor;
+        exit;
+      end;
+    VK_SHIFT,
     VK_MENU, //3 usual state keys
     VK_LSHIFT..VK_RMENU: //also 6 state keys
       begin
-        //ignore Ctrl/Alt/Shift to not hide caret
+        //ignore Alt/Shift to not hide caret
         exit;
       end;
     VK_TAB:
@@ -53,6 +60,24 @@ begin
     TimerBlinkDisable;
     DoCommand(NCmd, cInvokeHotkey);
     TimerBlinkEnable;
+  end;
+end;
+
+procedure TATSynEdit.KeyUp(var Key: Word; Shift: TShiftState);
+begin
+  inherited;
+  if Key=0 then Exit;
+
+  //special handle for spec keys
+  case Key of
+    VK_CONTROL,
+    VK_LWIN,
+    VK_RWIN:
+      begin
+        if FMouseDragDropping then
+          UpdateCursor;
+        exit;
+      end;
   end;
 end;
 
@@ -154,7 +179,7 @@ begin
     Key:= 0;
 end;
 
-function TATSynEdit.IsCommandResults_CaretMove(const Res: TATCommandResults): boolean; inline;
+function TATSynEdit.IsCommandResults_CaretMove(Res: TATCommandResults): boolean;
 begin
   Result:= Res*[
     cResultCaretAny,
@@ -222,6 +247,7 @@ begin
   DoCaretsFixIfInsideFolded;
   Carets.Sort;
 
+
   if IsCommandResults_CaretMove(Res) then
   begin
     if Carets.Count=1 then
@@ -235,16 +261,16 @@ begin
     if bAllowCaretScroll then
     begin
       if cResultCaretTop in Res then
-        DoGotoCaret(cEdgeTop, bUndoRedo, false, false)
+        DoGotoCaret(cEdgeTop, bUndoRedo, false, false, false)
       else
       if cResultCaretBottom in Res then
-        DoGotoCaret(cEdgeBottom, bUndoRedo, false, false)
+        DoGotoCaret(cEdgeBottom, bUndoRedo, false, false, false)
       else
       if cResultCaretLeft in Res then
-        DoGotoCaret(cEdgeLeft, bUndoRedo, false, false)
+        DoGotoCaret(cEdgeLeft, bUndoRedo, false, false, false)
       else
       if cResultCaretRight in Res then
-        DoGotoCaret(cEdgeRight, bUndoRedo, false, false);
+        DoGotoCaret(cEdgeRight, bUndoRedo, false, false, false);
     end;
 
     if not (cResultKeepColumnSel in Res) then
@@ -257,8 +283,12 @@ begin
     //will move-down exactly N times
     UpdateCaretsCoords;
 
+
     NProximityVert:= GetActualProximityVert;
-    if NProximityVert>0 then
+    if (NProximityVert>0)
+      and (ACmd<>cCommand_SelectAll) //don't apply Proximity if 'select all' is called
+      and (cResultCaretFarFromEdge in Res) //don't apply Proximity if caret was near the edge, before the command
+      then
     begin
       if (Carets.Count=1) or (Res*[cResultCaretTop, cResultCaretAny]<>[]) then
       begin
@@ -282,7 +312,12 @@ begin
           UpdateCaretsCoords;
       end;
     end;
-  end;
+  end
+  else
+  //scroll should do UpdateCaretsCoords, CudaText issue #3777
+  if cResultScroll in Res then
+    UpdateCaretsCoords;
+
 
   if bTextChanged then
   begin
@@ -614,6 +649,7 @@ var
   Res: TATCommandResults;
   Str: string;
   bTooManyCarets: boolean;
+  bCaretFarFromVertEdge: boolean;
   NCommandCode: integer;
   i: integer;
 begin
@@ -639,6 +675,8 @@ begin
   Strings.CommandCode:= NCommandCode;
 
   FCaretSpecPos:= false;
+
+  bCaretFarFromVertEdge:= IsCaretFarFromVertEdge;
 
   //moving must be with visible caret
   DoCaretForceShow;
@@ -734,6 +772,9 @@ begin
 
   if NCommandCode<>0 then
     Strings.CommandCode:= 0;
+  if bCaretFarFromVertEdge then
+    Include(Res, cResultCaretFarFromEdge);
+
   DoCommandResults(ACmd, Res);
   DoEventCommandAfter(ACmd, AText);
   FIsRunningCommand:= false;

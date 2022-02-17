@@ -31,6 +31,7 @@ uses
   ATStrings,
   ATStringProc_WordJump,
   ATCanvasPrimitives,
+  ATSynEdit_Options,
   ATSynEdit_CharSizer,
   {$ifdef USE_FPC_REGEXPR}
   RegExpr,
@@ -53,7 +54,6 @@ uses
   ATSynEdit_Hotspots,
   ATSynEdit_Micromap,
   ATSynEdit_Adapters,
-  ATSynEdit_Adapter_Cache,
   ATSynEdit_LinkCache,
   ATSynEdit_FGL,
   ATScrollBar;
@@ -124,6 +124,13 @@ type
     constructor Create;
     procedure Add(ACode: integer; AInvoke: TATEditorCommandInvoke; const AText: string);
   end;
+
+  TATEditorWheelRecord = record
+    Kind: (wqkVert, wqkHorz, wqkZoom);
+    Delta: integer;
+  end;
+
+  //TATEditorWheelQueue = specialize TQueue<TATEditorWheelRecord>;
 
 type
   TATTokenKind = (
@@ -241,6 +248,7 @@ type
     cResultCaretRight,       //Caret(s) pos/selection was changed. Scroll to the most right caret.
     cResultCaretBottom,      //Caret(s) pos/selection was changed. Scroll to the last caret.
     cResultCaretLazy,  //Additional to CaretLeft/CaretRight/CaretTop/CaretBottom, scrolls only if no carets are left in visible area.
+    cResultCaretFarFromEdge, //Before running the command, caret was far from both vertical edges
     cResultKeepColumnSel,    //Restore previous column selection, if command changed it.
     cResultScroll,           //Some scrolling was made.
     cResultUndoRedo,         //Undo or Redo action was made.
@@ -329,25 +337,28 @@ type
 
   TATEditorScrollInfo = record
   private
+    NPosInternal: Int64;
     procedure SetNPos(const AValue: Int64);
   public
     Vertical: boolean;
     NMax: Int64;
     NPage: Int64;
-    NPos_: Int64;
     NPosLast: Int64;
     NPixelOffset: Int64;
-    SmoothCharSize: Int64;
+    CharSizeScaled: Int64; //char width/height, multiplied by ATEditorCharXScale
     SmoothMax: Int64;
     SmoothPage: Int64;
     SmoothPos: Int64;
     SmoothPosLast: Int64;
-    property NPos: Int64 read NPos_ write SetNPos; //only for debugging
+    property NPos: Int64 //property is only for debugging
+      read NPosInternal
+      write NPosInternal;
+      //write SetNPos;
     procedure Clear;
     procedure SetZero; inline;
     procedure SetLast; inline;
     function TopGapVisible: boolean; inline;
-    function TotalOffset: Int64; inline;
+    function TotalOffset: Int64;
     class operator =(const A, B: TATEditorScrollInfo): boolean;
   end;
 
@@ -453,8 +464,6 @@ const
   cFoldedLenOfEmptyHint = 50;
   cFoldedMarkIndentInner = 2; //indent inside [...] folded-mark
   cFoldedMarkIndentOuter = 2; //indent before [...] folded-mark
-  cSpeedScrollAutoHorz: integer = 10; //auto-scroll (drag out of control): speed x
-  cSpeedScrollAutoVert: integer = 1; //... speed y
   cSpeedScrollNice: integer = 3;
   cSizeGutterFoldLineDx = 3;
   cSizeRulerHeightPercents = 120;
@@ -510,10 +519,6 @@ var
   cRectEmpty: TRect = (Left: 0; Top: 0; Right: 0; Bottom: 0);
   ATClipboardColumnFormat: TClipboardFormat = 0; //must be inited
   ATClipboardColumnSignature: integer = $1000;
-
-var
-  OptEditorDebugTiming: boolean = false;
-  OptEditorFlickerReducingPause: integer = 0; //when >=1000, timer is not used, but special check is used
 
 type
   TATSynEditClickEvent = procedure(Sender: TObject; var AHandled: boolean) of object;
@@ -757,6 +762,7 @@ type
     FWrapIndented: boolean;
     FWrapAddSpace: integer;
     FWrapEnabledForMaxLines: integer;
+    //FWheelQueue: TATEditorWheelQueue;
     FUnprintedVisible,
     FUnprintedSpaces,
     FUnprintedSpacesTrailing,
@@ -766,8 +772,8 @@ type
     FUnprintedEnds,
     FUnprintedEndsDetails: boolean;
     FPrevModified: boolean;
-    FCharSize: TPoint;
-    FCharSizeMinimap: TPoint;
+    FCharSize: TATEditorCharSize;
+    FCharSizeMinimap: TATEditorCharSize;
     FSpacingY: integer;
     FTabSize: integer;
     FGutter: TATGutter;
@@ -791,6 +797,8 @@ type
     FRectMinimap,
     FRectMicromap,
     FRectGutter,
+    FRectGutterBm,
+    FRectGutterNums,
     FRectRuler: TRect;
     FClientW: integer; //saved on Paint, to avoid calling Controls.ClientWidth/ClientHeight
     FClientH: integer;
@@ -917,7 +925,6 @@ type
     FOptCaretPosAfterPasteColumn: TATEditorPasteCaret;
     FOptCaretFixAfterRangeFolded: boolean;
     FOptCaretsMultiToColumnSel: boolean;
-    FOptCaretPaintNonBlinkingSimpler: boolean;
     FOptCaretProximityVert: integer;
     FOptMarkersSize: integer;
     FOptShowScrollHint: boolean;
@@ -1029,6 +1036,8 @@ type
     {$endif}
 
     //
+    function DoCalcForegroundFromAttribs(AX, AY: integer; var AColor: TColor;
+      var AFontStyles: TFontStyles): boolean;
     function DoCalcFoldProps(AWrapItemIndex: integer; out AProps: TATFoldBarProps): boolean;
     class function CheckInputForNumberOnly(const S: UnicodeString; X: integer;
       ch: WideChar; AllowNegative: boolean): boolean;
@@ -1037,8 +1046,10 @@ type
     procedure DebugSelRect;
     function DoCalcLineLen(ALineIndex: integer): integer;
     procedure DoChangeBookmarks;
+    procedure DoHandleWheelRecord(const ARec: TATEditorWheelRecord);
     procedure FlushEditingChangeEx(AChange: TATLineChangeKind; ALine, AItemCount: integer);
     procedure FlushEditingChangeLog(ALine: integer);
+    function GetActualDragDropIsCopying: boolean;
     function GetIndentString: UnicodeString;
     function GetActualProximityVert: integer;
     function GetAttribs: TATMarkers;
@@ -1050,6 +1061,7 @@ type
     function GetGutterDecor: TATGutterDecor;
     procedure InitFoldbarCache(ACacheStartIndex: integer);
     procedure InitLengthArray(var Lens: TATIntArray);
+    function IsCaretFarFromVertEdge: boolean;
     function IsCaretOnVisibleRect: boolean;
     function IsInvalidateAllowed: boolean; inline;
     function IsNormalLexerActive: boolean;
@@ -1188,13 +1200,19 @@ type
     procedure DoPaintBorder(C: TCanvas; AColor: TColor; ABorderWidth: integer; AUseRectMain: boolean);
     procedure DoPaintAll(C: TCanvas; ALineFrom: integer);
     procedure DoPaintMain(C: TCanvas; ALineFrom: integer);
-    procedure DoPaintLine(C: TCanvas; ARectLine: TRect; ACharSize: TPoint;
+    procedure DoPaintLine(C: TCanvas; ARectLine: TRect;
+      const ACharSize: TATEditorCharSize;
       var AScrollHorz, AScrollVert: TATEditorScrollInfo;
-      const AWrapIndex: integer; var ATempParts: TATLineParts);
-    procedure DoPaintMinimapLine(ARectLine: TRect; ACharSize: TPoint;
+      const AWrapIndex: integer;
+      var ATempParts: TATLineParts);
+    procedure DoPaintMinimapLine(ARectLine: TRect;
+      const ACharSize: TATEditorCharSize;
       var AScrollHorz, AScrollVert: TATEditorScrollInfo;
-      const AWrapIndex: integer; var ATempParts: TATLineParts);
-    procedure DoPaintGutterOfLine(C: TCanvas; ARect: TRect; ACharSize: TPoint;
+      const AWrapIndex: integer;
+      var ATempParts: TATLineParts);
+    procedure DoPaintGutterOfLine(C: TCanvas;
+      ARect: TRect;
+      const ACharSize: TATEditorCharSize;
       AWrapIndex: integer);
     procedure DoPaintNiceScroll(C: TCanvas);
     procedure DoPaintGutterNumber(C: TCanvas; ALineIndex, ACoordTop: integer; ABand: TATGutterItem);
@@ -1203,17 +1221,30 @@ type
     procedure DoPaintRulerCaretMark(C: TCanvas; ACaretX: integer);
     procedure DoPaintRulerCaretMarks(C: TCanvas);
     procedure DoPaintTiming(C: TCanvas);
-    procedure DoPaintText(C: TCanvas; const ARect: TRect;
-      const ACharSize: TPoint; AWithGutter: boolean;
-      var AScrollHorz, AScrollVert: TATEditorScrollInfo; ALineFrom: integer);
-    procedure DoPaintTextFragment(C: TCanvas; const ARect: TRect; ALineFrom,
-      ALineTo: integer; AConsiderWrapInfo: boolean; AColorBG, AColorBorder: TColor);
-    procedure DoPaintLineIndent(C: TCanvas; const ARect: TRect; ACharSize: TPoint;
-      ACoordY: integer; AIndentSize: integer; AColorBG: TColor;
-      AScrollPos: integer; AIndentLines: boolean);
+    procedure DoPaintText(C: TCanvas;
+      const ARect: TRect;
+      const ACharSize: TATEditorCharSize;
+      AWithGutter: boolean;
+      var AScrollHorz, AScrollVert: TATEditorScrollInfo;
+      ALineFrom: integer);
+    procedure DoPaintTextFragment(C: TCanvas;
+      const ARect: TRect;
+      ALineFrom, ALineTo: integer;
+      AConsiderWrapInfo: boolean;
+      AColorBG, AColorBorder: TColor);
+    procedure DoPaintLineIndent(C: TCanvas;
+      const ARect: TRect;
+      const ACharSize: TATEditorCharSize;
+      ACoordY: integer;
+      AIndentSize: integer;
+      AColorBG: TColor;
+      AScrollPos: integer;
+      AIndentLines: boolean);
     procedure DoPaintMinimapAllToBGRABitmap;
-    procedure DoPaintMinimapTextToBGRABitmap(const ARect: TRect;
-      ACharSize: TPoint; var AScrollHorz, AScrollVert: TATEditorScrollInfo);
+    procedure DoPaintMinimapTextToBGRABitmap(
+      const ARect: TRect;
+      const ACharSize: TATEditorCharSize;
+      var AScrollHorz, AScrollVert: TATEditorScrollInfo);
     procedure DoPaintMinimapSelToBGRABitmap;
     procedure DoPaintMinimapTooltip(C: TCanvas);
     procedure DoPaintMicromap(C: TCanvas);
@@ -1225,9 +1256,12 @@ type
     procedure DoPaintCarets(C: TCanvas; AWithInvalidate: boolean);
     procedure TimerBlinkDisable;
     procedure TimerBlinkEnable;
-    procedure DoPaintSelectedLineBG(C: TCanvas; ACharSize: TPoint;
-      const AVisRect: TRect; APointLeft, APointText: TPoint;
-      const AWrapItem: TATWrapItem; ALineWidth: integer;
+    procedure DoPaintSelectedLineBG(C: TCanvas;
+      const ACharSize: TATEditorCharSize;
+      const AVisRect: TRect;
+      APointLeft, APointText: TPoint;
+      const AWrapItem: TATWrapItem;
+      ALineWidth: integer;
       const AScrollHorz: TATEditorScrollInfo);
     procedure DoPaintMarkersTo(C: TCanvas);
     procedure DoPaintMarkerOfDragDrop(C: TCanvas);
@@ -1240,7 +1274,9 @@ type
       AY2: integer; AEntireHeight: boolean);
     procedure DoPaintLockedWarning(C: TCanvas);
     procedure DoPaintStaple(C: TCanvas; const R: TRect; AColor: TColor);
-    procedure DoPaintStaples(C: TCanvas; const ARect: TRect; ACharSize: TPoint;
+    procedure DoPaintStaples(C: TCanvas;
+      const ARect: TRect;
+      const ACharSize: TATEditorCharSize;
       const AScrollHorz: TATEditorScrollInfo);
     procedure DoPaintTextHintTo(C: TCanvas);
     procedure DoPaintMouseSelFrame(C: TCanvas);
@@ -1292,6 +1328,8 @@ type
     procedure GetRectMicromap(out R: TRect);
     procedure GetRectGutter(out R: TRect);
     procedure GetRectRuler(out R: TRect);
+    procedure GetRectGutterNumbers(out R: TRect);
+    procedure GetRectGutterBookmarks(out R: TRect);
     function GetTextOffset: TPoint;
     function GetPageLines: integer;
     function GetMinimapScrollPos: integer;
@@ -1316,9 +1354,9 @@ type
     procedure UpdateFoldedMarkTooltip;
     procedure UpdateClientSizes;
     function DoFormatLineNumber(N: integer): string;
-    function UpdateScrollInfoFromMessage(var Info: TATEditorScrollInfo; const Msg: TLMScroll): boolean;
+    function UpdateScrollInfoFromMessage(var AInfo: TATEditorScrollInfo; const AMsg: TLMScroll): boolean;
     procedure UpdateCaretsCoords(AOnlyLast: boolean = false);
-    function GetCharSize(C: TCanvas; ACharSpacingY: integer): TPoint;
+    function GetCharSize(C: TCanvas; ACharSpacingY: integer): TATEditorCharSize;
     function GetScrollbarVisible(bVertical: boolean): boolean;
     procedure SetMarginRight(AValue: integer);
 
@@ -1336,7 +1374,7 @@ type
     procedure DoCaretsDeleteOnSameLines;
 
     //editing
-    function IsCommandResults_CaretMove(const Res: TATCommandResults): boolean;
+    function IsCommandResults_CaretMove(Res: TATCommandResults): boolean;
     function DoCommandCore(ACmd: integer; const AText: atString): TATCommandResults;
     procedure DoCommandResults(ACmd: integer; Res: TATCommandResults);
     function DoCommand_TextInsertAtCarets(const AText: atString; AKeepCaret,
@@ -1401,8 +1439,8 @@ type
     function DoCommand_TextBackspace: TATCommandResults;
     function DoCommand_TextDelete: TATCommandResults;
     function DoCommand_TextDeleteSelection: TATCommandResults;
-    function DoCommand_TextDeleteLeft(ALen: integer; AAllowUnindent: boolean): TATCommandResults;
-    function DoCommand_TextDeleteRight(ALen: integer): TATCommandResults;
+    function DoCommand_TextDeleteLeft(ADeleteLen: integer; AAllowUnindent: boolean): TATCommandResults;
+    function DoCommand_TextDeleteRight(ADeleteLen: integer): TATCommandResults;
     function DoCommand_TextInsertEol(AKeepCaret: boolean): TATCommandResults;
     function DoCommand_ForceFinalEndOfLine: TATCommandResults;
     function DoCommand_DeleteFinalEndOfLine: TATCommandResults;
@@ -1536,7 +1574,7 @@ type
     function IsPosInVisibleArea(AX, AY: integer): boolean;
     function IsLineFolded(ALine: integer; ADetectPartialFold: boolean = false): boolean;
     function IsCharWord(ch: Widechar): boolean;
-    property TextCharSize: TPoint read FCharSize;
+    property TextCharSize: TATEditorCharSize read FCharSize;
     procedure DoUnfoldLine(ALine: integer);
     property RectMain: TRect read FRectMain;
     property RectGutter: TRect read FRectGutter;
@@ -1582,14 +1620,17 @@ type
     function OffsetToCaretPos(const APos: integer): TPoint;
     function CaretPosToOffset(const ACaret: TPoint): integer;
     //goto
-    function DoShowPos(const APos: TPoint; AIndentHorz, AIndentVert: integer; AUnfold, AllowUpdate: boolean): boolean;
+    function DoShowPos(const APos: TPoint; AIndentHorz, AIndentVert: integer;
+      AUnfold, AllowUpdate, AllowProximity: boolean): boolean;
     procedure DoGotoPos(const APos, APosEnd: TPoint;
       AIndentHorz, AIndentVert: integer;
       APlaceCaret, ADoUnfold: boolean;
       AAllowProcessMsg: boolean=true;
-      AAllowUpdate: boolean=true);
+      AAllowUpdate: boolean=true;
+      AAllowProximity: boolean=true);
     procedure DoGotoCaret(AEdge: TATCaretEdge; AUndoRedo: boolean=false;
-      AAllowProcessMsg: boolean= true; AAllowUpdate: boolean= true);
+      AAllowProcessMsg: boolean=true; AAllowUpdate: boolean=true;
+      AAllowProximity: boolean=true);
     //bookmarks
     procedure BookmarkSetForLineEx(ALine, ABmKind: integer;
       const AHint: string; AAutoDelete: TATBookmarkAutoDelete; AShowInList: boolean; const ATag: Int64;
@@ -1653,6 +1694,7 @@ type
     function TextSelected: atString;
     function TextSelectedEx(ACaret: TATCaretItem): atString;
     function TextCurrentWord: atString;
+    //LastCommandChangedLines: count of lines changed by last call of Strings.ActionTrimSpaces
     property LastCommandChangedLines: integer read GetLastCommandChangedLines write SetLastCommandChangedLines;
     property IsRunningCommand: boolean read FIsRunningCommand;
     property IsReadOnlyChanged: boolean read FIsReadOnlyChanged write FIsReadOnlyChanged;
@@ -1673,7 +1715,7 @@ type
     procedure DoScrollToBeginOrEnd(AToBegin: boolean);
     procedure DoScrollByDelta(ADeltaX, ADeltaY: integer);
     procedure DoScrollByDeltaInPixels(ADeltaX, ADeltaY: integer);
-    procedure DoScaleFontDelta(AInc: boolean);
+    procedure DoScaleFontDelta(AInc: boolean; AllowUpdate: boolean);
     function DoCalcLineHiliteEx(ALineIndex: integer; var AParts: TATLineParts;
       AColorBG: TColor; out AColorAfter: TColor): boolean;
     procedure DoSetMarkedLines(ALine1, ALine2: integer);
@@ -1690,6 +1732,7 @@ type
     procedure DoContextPopup(MousePos: TPoint; var Handled: Boolean); override;
     procedure UTF8KeyPress(var UTF8Key: TUTF8Char); override;
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
+    procedure KeyUp(var Key: Word; Shift: TShiftState); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X,Y: Integer); override;
@@ -1907,7 +1950,6 @@ type
     property OptCaretsAddedToColumnSelection: boolean read FOptCaretsAddedToColumnSelection write FOptCaretsAddedToColumnSelection default true;
     property OptCaretFixAfterRangeFolded: boolean read FOptCaretFixAfterRangeFolded write FOptCaretFixAfterRangeFolded default true;
     property OptCaretsMultiToColumnSel: boolean read FOptCaretsMultiToColumnSel write FOptCaretsMultiToColumnSel default cInitCaretsMultiToColumnSel;
-    property OptCaretPaintNonBlinkingSimpler: boolean read FOptCaretPaintNonBlinkingSimpler write FOptCaretPaintNonBlinkingSimpler default false;
     property OptCaretProximityVert: integer read FOptCaretProximityVert write FOptCaretProximityVert default 0;
     property OptMarkersSize: integer read FOptMarkersSize write FOptMarkersSize default cInitMarkerSize;
     property OptGutterVisible: boolean read FOptGutterVisible write FOptGutterVisible default true;
@@ -2043,10 +2085,6 @@ type
     property OptDimUnfocusedBack: integer read FOptDimUnfocusedBack write FOptDimUnfocusedBack default cInitDimUnfocusedBack;
   end;
 
-var
-  //better to have as global bar (for many editors)
-  OptMouseDragDropFocusesTargetEditor: boolean = true;
-
 const
   cEncNameUtf8_WithBom = 'UTF-8 with BOM';
   cEncNameUtf8_NoBom = 'UTF-8';
@@ -2102,14 +2140,13 @@ end;
 
 procedure TATSynEdit.DoPaintRuler(C: TCanvas);
 var
-  NX, NPrevFontSize, NRulerStart, NOutput,
+  NCoordX, NPrevFontSize, NRulerStart, NOutput,
   NTopIndent, NMarkHeight, i: integer;
-  NCharW: integer;
+  NCharWidthScaled: integer;
   Str: string;
 begin
   NPrevFontSize:= C.Font.Size;
   NRulerStart:= FScrollHorz.NPos;
-  NX:= FRectMain.Left;
   NTopIndent:= FOptRulerTopIndentPercents*FCharSize.Y div 100;
 
   C.Font.Name:= Font.Name;
@@ -2120,10 +2157,12 @@ begin
 
   C.FillRect(FRectRuler);
 
-  NCharW:= FCharSize.X * FOptRulerFontSizePercents div 100;
+  NCharWidthScaled:= FCharSize.XScaled * FOptRulerFontSizePercents div 100;
 
   for i:= NRulerStart to NRulerStart+FVisibleColumns+1 do
   begin
+    NCoordX:= FRectMain.Left + (i-NRulerStart) * FCharSize.XScaled div ATEditorCharXScale;
+
     case FOptRulerNumeration of
       cRulerNumeration_0_10_20:
         begin
@@ -2131,7 +2170,7 @@ begin
           if (i mod 10 = 0) then
           begin
             Str:= IntToStr(NOutput);
-            CanvasTextOutSimplest(C, NX - NCharW*Length(Str) div 2, NTopIndent, Str);
+            CanvasTextOutSimplest(C, NCoordX - NCharWidthScaled*Length(Str) div 2 div ATEditorCharXScale, NTopIndent, Str);
           end;
         end;
       cRulerNumeration_1_11_21:
@@ -2140,7 +2179,7 @@ begin
           if (i mod 10 = 0) then
           begin
             Str:= IntToStr(NOutput+1{!});
-            CanvasTextOutSimplest(C, NX - NCharW*Length(Str) div 2, NTopIndent, Str);
+            CanvasTextOutSimplest(C, NCoordX - NCharWidthScaled*Length(Str) div 2 div ATEditorCharXScale, NTopIndent, Str);
           end;
         end;
       cRulerNumeration_1_10_20:
@@ -2149,7 +2188,7 @@ begin
           if (NOutput=1) or (NOutput mod 10 = 0) then
           begin
             Str:= IntToStr(NOutput);
-            CanvasTextOutSimplest(C, NX - NCharW*Length(Str) div 2, NTopIndent, Str);
+            CanvasTextOutSimplest(C, NCoordX - NCharWidthScaled*Length(Str) div 2 div ATEditorCharXScale, NTopIndent, Str);
           end;
         end;
     end;
@@ -2159,9 +2198,7 @@ begin
     else
       NMarkHeight:= EditorScale(FOptRulerMarkSizeSmall);
 
-    CanvasLineVert(C, NX, FRectRuler.Bottom-1-NMarkHeight, FRectRuler.Bottom-1);
-
-    Inc(NX, FCharSize.X);
+    CanvasLineVert(C, NCoordX, FRectRuler.Bottom-1-NMarkHeight, FRectRuler.Bottom-1);
   end;
 
   CanvasLineHorz(C, FRectRuler.Left, FRectRuler.Bottom-1, FRectRuler.Right);
@@ -2202,7 +2239,7 @@ var
 begin
   Str:= IntToStr(Max(10, Strings.Count));
   FGutter[FGutterBandNumbers].Size:=
-    Length(Str)*FCharSize.X + 2*FNumbersIndent;
+    Length(Str)*FCharSize.XScaled div ATEditorCharXScale + 2*FNumbersIndent;
   FGutter.Update;
 end;
 
@@ -2216,8 +2253,8 @@ procedure TATSynEdit.UpdateMinimapAutosize;
 var
   CharSmall, CharBig: integer;
 begin
-  CharBig:= FCharSize.X;
-  CharSmall:= FCharSizeMinimap.X;
+  CharBig:= FCharSize.XScaled div ATEditorCharXScale;
+  CharSmall:= FCharSizeMinimap.XScaled div ATEditorCharXScale;
 
   if FMinimapCharWidth=0 then
   begin
@@ -2551,12 +2588,18 @@ end;
 
 function TATSynEdit.GetVisibleColumns: integer;
 begin
-  Result:= FRectMainVisible.Width div FCharSize.X;
+  Result:= FRectMainVisible.Width * ATEditorCharXScale div FCharSize.XScaled;
 end;
 
 function TATSynEdit.GetVisibleLinesMinimap: integer;
 begin
   Result:= FRectMinimap.Height div FCharSizeMinimap.Y - 1;
+end;
+
+function TATSynEdit.GetActualDragDropIsCopying: boolean;
+begin
+  Result:= FOptMouseDragDropCopying and
+    (FOptMouseDragDropCopyingWithState in GetKeyShiftState);
 end;
 
 function TATSynEdit.GetActualProximityVert: integer;
@@ -2592,7 +2635,15 @@ end;
 procedure TATSynEdit.SetText(const AValue: UnicodeString);
 begin
   Strings.LoadFromString(UTF8Encode(AValue));
+
   DoCaretSingle(0, 0);
+  if Assigned(FMarkers) then
+    FMarkers.Clear;
+  if Assigned(FAttribs) then
+    FAttribs.Clear;
+  if Assigned(FLinkCache) then
+    FLinkCache.Clear;
+
   Update(true);
 end;
 
@@ -2631,7 +2682,8 @@ begin
           FOptScrollIndentCaretHorz,
           FOptScrollIndentCaretVert,
           true,
-          true);
+          true,
+          false);
       end;
 end;
 
@@ -2687,9 +2739,9 @@ begin
       Inc(NMax, NPage);
     NPosLast:= Max(0, NMax-NPage);
 
-    SmoothCharSize:= FCharSize.Y;
-    SmoothMax:= NMax*SmoothCharSize + NGapAll;
-    SmoothPage:= NPage*SmoothCharSize;
+    CharSizeScaled:= FCharSize.Y * ATEditorCharXScale;
+    SmoothMax:= NMax * CharSizeScaled div ATEditorCharXScale + NGapAll;
+    SmoothPage:= NPage * CharSizeScaled div ATEditorCharXScale;
     SmoothPosLast:= Max(0, SmoothMax - SmoothPage);
     if AdjustSmoothPos then
       SmoothPos:= TotalOffset + NGapPos;
@@ -2704,9 +2756,9 @@ begin
       NMax:= NPage;
     NPosLast:= Max(0, NMax-NPage);
 
-    SmoothCharSize:= FCharSize.X;
-    SmoothMax:= NMax*SmoothCharSize;
-    SmoothPage:= NPage*SmoothCharSize;
+    CharSizeScaled:= FCharSize.XScaled;
+    SmoothMax:= NMax * CharSizeScaled div ATEditorCharXScale;
+    SmoothPage:= NPage * CharSizeScaled div ATEditorCharXScale;
     SmoothPosLast:= Max(0, SmoothMax - SmoothPage);
     if AdjustSmoothPos then
       SmoothPos:= TotalOffset;
@@ -2785,7 +2837,7 @@ begin
     begin
       FScrollbarVert.Min:= 0;
       FScrollbarVert.Max:= FScrollVert.SmoothMax;
-      FScrollbarVert.SmallChange:= FScrollVert.SmoothCharSize;
+      FScrollbarVert.SmallChange:= FScrollVert.CharSizeScaled div ATEditorCharXScale;
       FScrollbarVert.PageSize:= FScrollVert.SmoothPage;
       FScrollbarVert.Position:= FScrollVert.SmoothPos;
     end;
@@ -2836,7 +2888,7 @@ begin
     FScrollbarLock:= true;
     FScrollbarHorz.Min:= 0;
     FScrollbarHorz.Max:= FScrollHorz.SmoothMax;
-    FScrollbarHorz.SmallChange:= FScrollHorz.SmoothCharSize;
+    FScrollbarHorz.SmallChange:= FScrollHorz.CharSizeScaled div ATEditorCharXScale;
     FScrollbarHorz.PageSize:= FScrollHorz.SmoothPage;
     FScrollbarHorz.Position:= FScrollHorz.SmoothPos;
     FScrollbarHorz.Update;
@@ -2918,7 +2970,7 @@ procedure TATSynEdit.GetRectMicromap(out R: TRect);
 var
   NSize: integer;
 begin
-  NSize:= FMicromap.UpdateSizes(EditorScale(FCharSize.X));
+  NSize:= FMicromap.UpdateSizes(EditorScale(FCharSize.XScaled) div ATEditorCharXScale);
 
   if not FMicromapVisible or FMicromapOnScrollbar then
   begin
@@ -2970,6 +3022,33 @@ begin
   R.Bottom:= R.Top + FRulerHeight;
 end;
 
+procedure TATSynEdit.GetRectGutterNumbers(out R: TRect);
+begin
+  if FOptGutterVisible and FGutter[FGutterBandNumbers].Visible then
+  begin
+    R.Left:= FGutter[FGutterBandNumbers].Left;
+    R.Right:= FGutter[FGutterBandNumbers].Right;
+    R.Top:= FRectGutter.Top;
+    R.Bottom:= FRectGutter.Bottom;
+  end
+  else
+    R:= cRectEmpty;
+end;
+
+procedure TATSynEdit.GetRectGutterBookmarks(out R: TRect);
+begin
+  if FOptGutterVisible and FGutter[FGutterBandBookmarks].Visible then
+  begin
+    R.Left:= FGutter[FGutterBandBookmarks].Left;
+    R.Right:= FGutter[FGutterBandBookmarks].Right;
+    R.Top:= FRectGutter.Top;
+    R.Bottom:= FRectGutter.Bottom;
+  end
+  else
+    R:= cRectEmpty;
+end;
+
+
 procedure TATSynEdit.UpdateClientSizes;
 begin
   GetClientSizes(FClientW, FClientH);
@@ -2992,16 +3071,16 @@ begin
 
   if FMinimapCustomScale<100 then
   begin
-    FCharSizeMinimap.X:= EditorScale(1);
+    FCharSizeMinimap.XScaled:= EditorScale(1) * ATEditorCharXScale;
     FCharSizeMinimap.Y:= EditorScale(2);
   end
   else
   begin
-    FCharSizeMinimap.X:= 1 * FMinimapCustomScale div 100;
+    FCharSizeMinimap.XScaled:= 1 * FMinimapCustomScale div 100 * ATEditorCharXScale;
     FCharSizeMinimap.Y:= 2 * FMinimapCustomScale div 100;
   end;
 
-  FNumbersIndent:= FCharSize.X * FOptNumbersIndentPercents div 100;
+  FNumbersIndent:= FCharSize.XScaled * FOptNumbersIndentPercents div 100 div ATEditorCharXScale;
   FRulerHeight:= FCharSize.Y * FOptRulerHeightPercents div 100;
 
   if FOptGutterVisible and FOptNumbersAutosize then
@@ -3017,6 +3096,8 @@ begin
   GetRectGutter(FRectGutter);
   GetRectMain(FRectMain); //after gutter/minimap/micromap
   GetRectRuler(FRectRuler); //after main
+  GetRectGutterBookmarks(FRectGutterBm); //after gutter
+  GetRectGutterNumbers(FRectGutterNums); //after gutter
 end;
 
 procedure TATSynEdit.DoPaintMain(C: TCanvas; ALineFrom: integer);
@@ -3070,7 +3151,7 @@ begin
     C.Brush.Color:= Colors.Markers;
     C.Font.Color:= Colors.TextSelFont;
     CanvasTextOutSimplest(C,
-      FRectMain.Right-Length(cTextMacro)*FCharSize.X-FOptBorderWidthMacro,
+      FRectMain.Right-Length(cTextMacro)*FCharSize.XScaled div ATEditorCharXScale - FOptBorderWidthMacro,
       FRectMain.Bottom-FCharSize.Y,
       cTextMacro);
   end
@@ -3178,17 +3259,26 @@ begin
   end;
 end;
 
-function TATSynEdit.GetCharSize(C: TCanvas; ACharSpacingY: integer): TPoint;
+function TATSynEdit.GetCharSize(C: TCanvas; ACharSpacingY: integer): TATEditorCharSize;
 const
-  Sample: string = 'N'; //char 'M' is not ok, it's too wide for var-width fonts
+  SampleChar = 'N';
 var
+  SampleStrLen: integer;
+  SampleStr: string;
   Size: TSize;
   TempC: TCanvas;
   dc: HDC;
 begin
+  if ATEditorOptions.PreciseCalculationOfCharWidth then
+    SampleStrLen:= 128
+  else
+    SampleStrLen:= 1;
+
+  SampleStr:= StringOfChar(SampleChar, SampleStrLen);
+
   if C.HandleAllocated then
   begin
-    Size:= C.TextExtent(Sample);
+    Size:= C.TextExtent(SampleStr);
   end
   else
   begin
@@ -3198,14 +3288,14 @@ begin
       TempC.Handle:= dc;
       TempC.Font.Name:= Self.Font.Name;
       TempC.Font.Size:= DoScaleFont(Self.Font.Size);
-      Size:= TempC.TextExtent(Sample);
+      Size:= TempC.TextExtent(SampleStr);
       ReleaseDC(dc, 0);
     finally
       FreeAndNil(TempC);
     end;
   end;
 
-  Result.X:= Max(1, Size.cx);
+  Result.XScaled:= Max(1, Size.cx) * ATEditorCharXScale div SampleStrLen;
   Result.Y:= Max(1, Size.cy + ACharSpacingY);
 end;
 
@@ -3235,7 +3325,7 @@ type
 
 procedure TATSynEdit.DoPaintText(C: TCanvas;
   const ARect: TRect;
-  const ACharSize: TPoint;
+  const ACharSize: TATEditorCharSize;
   AWithGutter: boolean;
   var AScrollHorz, AScrollVert: TATEditorScrollInfo;
   ALineFrom: integer);
@@ -3353,9 +3443,10 @@ begin
           else
             CanvasArrowHorz(C,
               RectLine,
-              Colors.UnprintedFont, OptUnprintedEofCharLength*ACharSize.X,
+              Colors.UnprintedFont,
+              ATEditorOptions.UnprintedEofCharLength*ACharSize.XScaled div ATEditorCharXScale,
               false,
-              OptUnprintedTabPointerScale);
+              ATEditorOptions.UnprintedTabPointerScale);
       Break;
     end;
 
@@ -3390,7 +3481,8 @@ begin
 end;
 
 procedure TATSynEdit.DoPaintMinimapTextToBGRABitmap(
-  const ARect: TRect; ACharSize: TPoint;
+  const ARect: TRect;
+  const ACharSize: TATEditorCharSize;
   var AScrollHorz, AScrollVert: TATEditorScrollInfo);
 var
   RectLine: TRect;
@@ -3427,7 +3519,7 @@ end;
 
 procedure TATSynEdit.DoPaintLine(C: TCanvas;
   ARectLine: TRect;
-  ACharSize: TPoint;
+  const ACharSize: TATEditorCharSize;
   var AScrollHorz, AScrollVert: TATEditorScrollInfo;
   const AWrapIndex: integer;
   var ATempParts: TATLineParts);
@@ -3505,7 +3597,7 @@ begin
   CurrPoint.X:= ARectLine.Left;
   CurrPoint.Y:= ARectLine.Top;
   CurrPointText.X:= Int64(CurrPoint.X)
-                    + Int64(WrapItem.NIndent)*ACharSize.X
+                    + Int64(WrapItem.NIndent)*ACharSize.XScaled div ATEditorCharXScale
                     - AScrollHorz.SmoothPos
                     + AScrollHorz.NPixelOffset;
   CurrPointText.Y:= CurrPoint.Y;
@@ -3514,7 +3606,7 @@ begin
   bTrimmedNonSpaces:= false;
 
   NLineLen:= St.LinesLen[NLinesIndex];
-  bLineHuge:= WrapItem.NLength>OptMaxLineLenForAccurateCharWidths;
+  bLineHuge:= WrapItem.NLength>ATEditorOptions.MaxLineLenForAccurateCharWidths;
           //not this: NLineLen>OptMaxLineLenForAccurateCharWidths;
 
   if not bLineHuge then
@@ -3535,7 +3627,8 @@ begin
       FTabHelper.FindOutputSkipOffset(
         NLinesIndex,
         StrOutput,
-        AScrollHorz.NPos,
+        AScrollHorz.SmoothPos,
+        ACharSize.XScaled,
         NOutputCharsSkipped,
         NOutputCellPercentsSkipped);
       Delete(StrOutput, 1, NOutputCharsSkipped);
@@ -3544,11 +3637,11 @@ begin
   else
   begin
     //work faster for huge lines (but not accurate horiz scrollbar)
-    NOutputCharsSkipped:= AScrollHorz.NPos;
+    NOutputCharsSkipped:= AScrollHorz.SmoothPos * ATEditorCharXScale div ACharSize.XScaled;
     NOutputCellPercentsSkipped:= NOutputCharsSkipped*100;
 
     NSubPos:= WrapItem.NCharIndex + NOutputCharsSkipped;
-    NSubLen:= Min(WrapItem.NLength, FVisibleColumns+AScrollHorz.NPos+1+6);
+    NSubLen:= Min(WrapItem.NLength, FVisibleColumns+1+6);
       //+1 because of NPixelOffset
       //+6 because of HTML color underlines
     StrOutput:= St.LineSub(NLinesIndex, NSubPos, NSubLen);
@@ -3557,7 +3650,7 @@ begin
       bTrimmedNonSpaces:= NSubPos+NSubLen <= St.LineLenWithoutSpace(NLinesIndex);
   end;
 
-  Inc(CurrPointText.X, NOutputCellPercentsSkipped * ACharSize.X div 100);
+  Inc(CurrPointText.X, NOutputCellPercentsSkipped * ACharSize.XScaled div ATEditorCharXScale div 100);
 
   if Length(StrOutput)>cMaxCharsForOutput then
     SetLength(StrOutput, cMaxCharsForOutput);
@@ -3662,11 +3755,11 @@ begin
 
     Event:= FOnDrawLine;
 
-    if OptUnprintedReplaceSpec then
-      SRemoveAsciiControlChars(StrOutput, WideChar(OptUnprintedReplaceSpecToCode));
+    if ATEditorOptions.UnprintedReplaceSpec then
+      SRemoveAsciiControlChars(StrOutput, WideChar(ATEditorOptions.UnprintedReplaceSpecToCode));
 
     //truncate text to not paint over screen
-    NCount:= ARectLine.Width div ACharSize.X + 2;
+    NCount:= ARectLine.Width * ATEditorCharXScale div ACharSize.XScaled + 2;
     if Length(StrOutput)>NCount then
       SetLength(StrOutput, NCount);
 
@@ -3680,7 +3773,7 @@ begin
       TextOutProps.CharsSkipped:= NOutputCellPercentsSkipped div 100;
       TextOutProps.TrimmedTrailingNonSpaces:= bTrimmedNonSpaces;
       TextOutProps.DrawEvent:= Event;
-      TextOutProps.ControlWidth:= ClientWidth+ACharSize.X*2;
+      TextOutProps.ControlWidth:= ClientWidth+ACharSize.XScaled div ATEditorCharXScale * 2;
       TextOutProps.TextOffsetFromLine:= FTextOffsetFromTop;
 
       TextOutProps.ShowUnprinted:= FUnprintedVisible and FUnprintedSpaces;
@@ -3758,7 +3851,7 @@ begin
       C.FillRect(
         CoordAfterText.X,
         CoordAfterText.Y,
-        CoordAfterText.X+ACharSize.X,
+        CoordAfterText.X+ACharSize.XScaled div ATEditorCharXScale,
         CoordAfterText.Y+ACharSize.Y);
     end;
 
@@ -3830,7 +3923,7 @@ end;
 
 procedure TATSynEdit.DoPaintMinimapLine(
   ARectLine: TRect;
-  ACharSize: TPoint;
+  const ACharSize: TATEditorCharSize;
   var AScrollHorz, AScrollVert: TATEditorScrollInfo;
   const AWrapIndex: integer;
   var ATempParts: TATLineParts);
@@ -3860,7 +3953,7 @@ begin
   St:= Strings;
   bUseSetPixel:=
     {$ifndef windows} DoubleBuffered and {$endif}
-    (ACharSize.X=1);
+    (ACharSize.XScaled div ATEditorCharXScale = 1);
 
   if not FWrapInfo.IsIndexValid(AWrapIndex) then Exit; //e.g. main thread updated WrapInfo
   WrapItem:= FWrapInfo[AWrapIndex];
@@ -3873,7 +3966,7 @@ begin
   CurrPoint.X:= ARectLine.Left;
   CurrPoint.Y:= ARectLine.Top;
   CurrPointText.X:= Int64(CurrPoint.X)
-                    + Int64(WrapItem.NIndent)*ACharSize.X
+                    + Int64(WrapItem.NIndent)*ACharSize.XScaled div ATEditorCharXScale
                     - AScrollHorz.SmoothPos
                     + AScrollHorz.NPixelOffset;
   CurrPointText.Y:= CurrPoint.Y;
@@ -3917,7 +4010,7 @@ begin
         FillOneLine(NColorAfter, CurrPointText.X);
 
     //truncate text to not paint over screen
-    NCount:= ARectLine.Width div ACharSize.X + 2;
+    NCount:= ARectLine.Width div ACharSize.XScaled div ATEditorCharXScale + 2;
     if Length(StrOutput)>NCount then
       SetLength(StrOutput, NCount);
 
@@ -3962,7 +4055,9 @@ begin
   end;
 end;
 
-procedure TATSynEdit.DoPaintGutterOfLine(C: TCanvas; ARect: TRect; ACharSize: TPoint;
+procedure TATSynEdit.DoPaintGutterOfLine(C: TCanvas;
+  ARect: TRect;
+  const ACharSize: TATEditorCharSize;
   AWrapIndex: integer);
 var
   St: TATStrings;
@@ -4198,7 +4293,7 @@ begin
   //avoid too often minimap repainting
   if not FAdapterIsDataReady then exit;
 
-  if OptEditorDebugTiming then
+  if ATEditorOptions.DebugTiming then
     FTickMinimap:= GetTickCount64;
 
   FScrollHorzMinimap.Clear;
@@ -4210,7 +4305,7 @@ begin
   DoPaintMinimapTextToBGRABitmap(FRectMinimap, FCharSizeMinimap, FScrollHorzMinimap, FScrollVertMinimap);
   DoPaintMinimapSelToBGRABitmap;
 
-  if OptEditorDebugTiming then
+  if ATEditorOptions.DebugTiming then
     FTickMinimap:= GetTickCount64-FTickMinimap;
 end;
 
@@ -4282,7 +4377,7 @@ procedure TATSynEdit.DoPaintMargins(C: TCanvas);
   //
   function PosX(NMargin: integer): integer; inline;
   begin
-    Result:= FRectMain.Left + FCharSize.X*(NMargin-FScrollHorz.NPos);
+    Result:= FRectMain.Left + FCharSize.XScaled *(NMargin-FScrollHorz.NPos) div ATEditorCharXScale;
   end;
 var
   NWidth, i: integer;
@@ -4461,8 +4556,11 @@ begin
 
   FWantTabs:= true;
   FWantReturns:= true;
-  FCharSize:= Point(4, 4); //not nul
+  FCharSize.XScaled:= 4 * ATEditorCharXScale;
+  FCharSize.Y:= 4;
   FEditorIndex:= 0;
+
+  //FWheelQueue:= TATEditorWheelQueue.Create;
 
   FCommandLog:= TATEditorCommandLog.Create;
 
@@ -4700,7 +4798,8 @@ begin
   FMinimapHiliteLinesWithSelection:= true;
 
   FSpacingY:= cInitSpacingY;
-  FCharSizeMinimap:= Point(1, 2);
+  FCharSizeMinimap.XScaled:= 1 * ATEditorCharXScale;
+  FCharSizeMinimap.Y:= 2;
 
   FOptScrollStyleHorz:= aessAuto;
   FOptScrollStyleVert:= aessShow;
@@ -4940,6 +5039,7 @@ begin
   FreeAndNil(FCaretShapeNormal);
   FreeAndNil(FCaretShapeOverwrite);
   FreeAndNil(FCaretShapeReadonly);
+  //FreeAndNil(FWheelQueue);
   inherited;
 end;
 
@@ -5251,7 +5351,7 @@ begin
 
   if FOptTextCenteringCharWidth>0 then
     Result.X:= Max(0, (ClientWidth - NGutterWidth -
-                       FOptTextCenteringCharWidth * FCharSize.X) div 2)
+                       FOptTextCenteringCharWidth * FCharSize.XScaled div ATEditorCharXScale) div 2)
   else
     Result.X:= OptTextOffsetLeft;
 
@@ -5466,7 +5566,7 @@ begin
   if DoubleBuffered then
     if not Assigned(FBitmap) then exit;
 
-  if OptEditorDebugTiming then
+  if ATEditorOptions.DebugTiming then
   begin
     FTickAll:= GetTickCount64;
     FTickMinimap:= 0;
@@ -5501,7 +5601,7 @@ begin
 
   DoPaintMarkerOfDragDrop(Canvas);
 
-  if OptEditorDebugTiming then
+  if ATEditorOptions.DebugTiming then
   begin
     FTickAll:= GetTickCount64-FTickAll;
     DoPaintTiming(Canvas);
@@ -5605,21 +5705,25 @@ begin
     FHintWnd.Hide;
 end;
 
-procedure TATSynEdit.UpdateScrollInfoFromSmoothPos(var AInfo: TATEditorScrollInfo; const APos: Int64);
+procedure _UpdateScrollInfoFromSmoothPos(
+  var AInfo: TATEditorScrollInfo;
+  const APos: Int64;
+  AWrapInfo: TATWrapInfo;
+  AGaps: TATGaps);
 //Note: for vertical bar, NPos=-1 means than we are before the first line, over top gap
 var
-  NPos, NPixels, NLineIndex, NCharSize: Int64;
+  NPos, NPixels, NLineIndex: Int64;
   NSizeGapTop, NSizeGap0: Int64;
   bConsiderGaps: boolean;
 begin
   AInfo.SmoothPos:= APos;
-  bConsiderGaps:= AInfo.Vertical and (Gaps.Count>0);
+  bConsiderGaps:= AInfo.Vertical and (AGaps.Count>0);
 
   if APos<=0 then
   begin
     AInfo.SetZero;
     if bConsiderGaps then
-      if Gaps.SizeOfGapTop>0 then
+      if AGaps.SizeOfGapTop>0 then
         AInfo.NPos:= -1;
     exit
   end;
@@ -5633,8 +5737,8 @@ begin
   if bConsiderGaps then
   begin
     //for position before line=0
-    NSizeGapTop:= Gaps.SizeOfGapTop;
-    NSizeGap0:= Gaps.SizeOfGap0;
+    NSizeGapTop:= AGaps.SizeOfGapTop;
+    NSizeGap0:= AGaps.SizeOfGap0;
 
     if NSizeGapTop>0 then
       if APos<NSizeGapTop then
@@ -5647,7 +5751,7 @@ begin
     //for position before line=1
     //(other positions are calculated ok later)
     if NSizeGap0>0 then
-      if APos<NSizeGapTop+AInfo.SmoothCharSize+NSizeGap0 then
+      if APos<NSizeGapTop+AInfo.CharSizeScaled div ATEditorCharXScale + NSizeGap0 then
       begin
         AInfo.NPos:= 0;
         AInfo.NPixelOffset:= APos-NSizeGapTop;
@@ -5655,19 +5759,18 @@ begin
       end;
   end;
 
-  NCharSize:= AInfo.SmoothCharSize;
-  AInfo.NPos:= Min(APos div NCharSize, AInfo.NMax);
-  AInfo.NPixelOffset:= APos mod NCharSize;
+  AInfo.NPos:= Min(APos * ATEditorCharXScale div AInfo.CharSizeScaled, AInfo.NMax);
+  AInfo.NPixelOffset:= APos mod (AInfo.CharSizeScaled div ATEditorCharXScale);
 
   //consider Gaps for vert scrolling
   if bConsiderGaps then
   begin
-    NPos:= Min(AInfo.NPos, WrapInfo.Count-1);
+    NPos:= Min(AInfo.NPos, AWrapInfo.Count-1);
     NPixels:= AInfo.NPixelOffset;
 
     repeat
-      NLineIndex:= FWrapInfo.Data[NPos].NLineIndex - 1;
-      NPixels:= APos - NPos*NCharSize - Gaps.SizeForLineRange(-1, NLineIndex);
+      NLineIndex:= AWrapInfo.Data[NPos].NLineIndex - 1;
+      NPixels:= APos - NPos* AInfo.CharSizeScaled div ATEditorCharXScale - AGaps.SizeForLineRange(-1, NLineIndex);
       if NPos=0 then Break;
       if NLineIndex=0 then Break;
       if NPixels>=0 then Break;
@@ -5679,57 +5782,62 @@ begin
   end;
 end;
 
-function TATSynEdit.UpdateScrollInfoFromMessage(var Info: TATEditorScrollInfo; const Msg: TLMScroll): boolean;
+procedure TATSynEdit.UpdateScrollInfoFromSmoothPos(var AInfo: TATEditorScrollInfo; const APos: Int64);
 begin
-  if Info.NMax<Info.NPage then
+  _UpdateScrollInfoFromSmoothPos(AInfo, APos, WrapInfo, Gaps);
+end;
+
+function TATSynEdit.UpdateScrollInfoFromMessage(var AInfo: TATEditorScrollInfo; const AMsg: TLMScroll): boolean;
+begin
+  if AInfo.NMax<AInfo.NPage then
   begin
-    Info.Clear;
+    AInfo.Clear;
     Exit(true);
   end;
 
-  case Msg.ScrollCode of
+  case AMsg.ScrollCode of
     SB_TOP:
       begin
-        UpdateScrollInfoFromSmoothPos(Info, 0);
+        UpdateScrollInfoFromSmoothPos(AInfo, 0);
       end;
 
     SB_BOTTOM:
       begin
-        UpdateScrollInfoFromSmoothPos(Info, Info.SmoothPosLast);
+        UpdateScrollInfoFromSmoothPos(AInfo, AInfo.SmoothPosLast);
       end;
 
     SB_LINEUP:
       begin
-        UpdateScrollInfoFromSmoothPos(Info, Info.SmoothPos-Info.SmoothCharSize);
+        UpdateScrollInfoFromSmoothPos(AInfo, AInfo.SmoothPos-AInfo.CharSizeScaled div ATEditorCharXScale);
       end;
 
     SB_LINEDOWN:
       begin
-        UpdateScrollInfoFromSmoothPos(Info, Info.SmoothPos+Info.SmoothCharSize);
+        UpdateScrollInfoFromSmoothPos(AInfo, AInfo.SmoothPos+AInfo.CharSizeScaled div ATEditorCharXScale);
       end;
 
     SB_PAGEUP:
       begin
-        UpdateScrollInfoFromSmoothPos(Info, Info.SmoothPos-Info.SmoothPage);
+        UpdateScrollInfoFromSmoothPos(AInfo, AInfo.SmoothPos-AInfo.SmoothPage);
       end;
 
     SB_PAGEDOWN:
       begin
-        UpdateScrollInfoFromSmoothPos(Info, Info.SmoothPos+Info.SmoothPage);
+        UpdateScrollInfoFromSmoothPos(AInfo, AInfo.SmoothPos+AInfo.SmoothPage);
       end;
 
     SB_THUMBPOSITION:
       begin
-        //must ignore message with Msg.Msg set: LM_VSCROLL, LM_HSCROLL;
+        //must ignore message with AMsg.Msg set: LM_VSCROLL, LM_HSCROLL;
         //we get it on macOS during window resize, not expected! moves v-scroll pos to 0.
-        if Msg.Msg=0 then
-          UpdateScrollInfoFromSmoothPos(Info, Msg.Pos);
+        if AMsg.Msg=0 then
+          UpdateScrollInfoFromSmoothPos(AInfo, AMsg.Pos);
       end;
 
     SB_THUMBTRACK:
       begin
-        UpdateScrollInfoFromSmoothPos(Info, Msg.Pos);
-        if Info.Vertical then
+        UpdateScrollInfoFromSmoothPos(AInfo, AMsg.Pos);
+        if AInfo.Vertical then
           DoHintShow;
       end;
 
@@ -5738,13 +5846,13 @@ begin
   end;
 
   //correct value (if -1)
-  if Info.SmoothPos>Info.SmoothPosLast then
-    UpdateScrollInfoFromSmoothPos(Info, Info.SmoothPosLast)
+  if AInfo.SmoothPos>AInfo.SmoothPosLast then
+    UpdateScrollInfoFromSmoothPos(AInfo, AInfo.SmoothPosLast)
   else
-  if Info.SmoothPos<0 then
-    UpdateScrollInfoFromSmoothPos(Info, 0);
+  if AInfo.SmoothPos<0 then
+    UpdateScrollInfoFromSmoothPos(AInfo, 0);
 
-  Result:= Msg.ScrollCode<>SB_THUMBTRACK;
+  Result:= AMsg.ScrollCode<>SB_THUMBTRACK;
 end;
 
 procedure TATSynEdit.WMVScroll(var Msg: TLMVScroll);
@@ -5908,7 +6016,7 @@ begin
           FOnClickGap(Self, PosDetails.OnGapItem, PosDetails.OnGapPos);
       end;
 
-      if FOptMouseDragDrop and bClickOnSelection and not ModeReadOnly then
+      if FOptMouseDragDrop and bClickOnSelection then
       begin
         //DragMode must be dmManual, drag started by code
         FMouseDragDropping:= true;
@@ -6010,7 +6118,6 @@ end;
 
 procedure TATSynEdit.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 var
-  bCopySelection: boolean;
   Str: atString;
   Caret: TATCaretItem;
   PosDetails: TATEditorPosDetails;
@@ -6046,10 +6153,7 @@ begin
     begin
       Strings.BeginUndoGroup;
       try
-        bCopySelection:=
-          FOptMouseDragDropCopying and
-          (FOptMouseDragDropCopyingWithState in Shift);
-        DoDropText(not bCopySelection);
+        DoDropText(not GetActualDragDropIsCopying);
       finally
         Strings.EndUndoGroup;
         Update;
@@ -6162,44 +6266,47 @@ end;
 
 procedure TATSynEdit.UpdateCursor;
 var
-  P: TPoint;
-  RectBm, RectNums: TRect;
+  PntMouse, P: TPoint;
 begin
   if MouseNiceScroll then Exit;
-  P:= ScreenToClient(Mouse.CursorPos);
+  PntMouse:= Mouse.CursorPos;
+  P:= ScreenToClient(PntMouse);
 
-  RectBm.Left:= FGutter[FGutterBandBookmarks].Left;
-  RectBm.Right:= FGutter[FGutterBandBookmarks].Right;
-  RectBm.Top:= FRectGutter.Top;
-  RectBm.Bottom:= FRectGutter.Bottom;
-
-  RectNums.Left:= FGutter[FGutterBandNumbers].Left;
-  RectNums.Right:= FGutter[FGutterBandNumbers].Right;
-  RectNums.Top:= FRectGutter.Top;
-  RectNums.Bottom:= FRectGutter.Bottom;
-
-  //if FMouseDragDropping then
-  //  Cursor:= crDrag
-  //else
-  //if FMouseDragMinimap then
-  //  Cursor:= crSizeNS
-  //else
+  if FMouseDragDropping and FMouseDragDroppingReal then
+  begin
+    if PtInRect(FRectMain, P) then
+    begin
+      if ModeReadOnly then
+        Cursor:= crNoDrop
+      else
+      if GetActualDragDropIsCopying then
+        Cursor:= crMultiDrag
+      else
+        Cursor:= crDrag;
+    end
+    else
+      Cursor:= crNoDrop;
+  end
+  else
   if PtInRect(FRectMain, P) then
   begin
-    if FMouseDragDropping and FMouseDragDroppingReal then
-      Cursor:= crDrag
-    else
     if FMouseDownAndColumnSelection then
       Cursor:= FCursorColumnSel
     else
       Cursor:= FCursorText;
   end
   else
-  if PtInRect(RectBm, P) then
-    Cursor:= FCursorGutterBookmark
+  if PtInRect(FRectGutterBm, P) then
+  begin
+    if FMouseDownPnt.Y<0 then
+      Cursor:= FCursorGutterBookmark;
+  end
   else
-  if PtInRect(RectNums, P) then
-    Cursor:= FCursorGutterNumbers
+  if PtInRect(FRectGutterNums, P) then
+  begin
+    if FMouseDownPnt.Y<0 then
+      Cursor:= FCursorGutterNumbers;
+  end
   else
   if PtInRect(FRectMinimap, P) then
     Cursor:= FCursorMinimap
@@ -6224,7 +6331,6 @@ const
   cMovedDeltaPx = 5;
 var
   P: TPoint;
-  RectNums, RectBookmk: TRect;
   bOnMain, bOnMinimap, bOnMicromap,
   bOnGutter, bOnGutterNumbers, bOnGutterBookmk,
   bSelecting, bSelectingGutterNumbers: boolean;
@@ -6239,6 +6345,8 @@ begin
 
   P:= Point(X, Y);
   UpdateCursor;
+  if not PtInRect(ClientRect, P) then
+    exit;
 
   bMovedMinimal:= IsPointsDiffByDelta(P, FMouseDownCoordOriginal, cMovedDeltaPx);
 
@@ -6257,8 +6365,8 @@ begin
   bOnMinimap:= FMinimapVisible and PtInRect(FRectMinimap, P);
   bOnMicromap:= FMicromapVisible and not FMicromapOnScrollbar and PtInRect(FRectMicromap, P);
   bOnGutter:= FOptGutterVisible and PtInRect(FRectGutter, P);
-  bOnGutterNumbers:= false;
-  bOnGutterBookmk:= false;
+  bOnGutterNumbers:= bOnGutter and PtInRect(FRectGutterNums, P);
+  bOnGutterBookmk:= bOnGutter and PtInRect(FRectGutterBm, P);
 
   //detect cursor on minimap
   if FMinimapVisible then
@@ -6295,31 +6403,6 @@ begin
       if bOnGutter<>FCursorOnGutter then
         Invalidate;
     FCursorOnGutter:= bOnGutter;
-  end;
-
-  RectNums:= Rect(0, 0, 0, 0);
-  RectBookmk:= Rect(0, 0, 0, 0);
-  if FOptGutterVisible then
-  begin
-    if FGutter[FGutterBandNumbers].Visible then
-    begin
-      RectNums.Left:= FGutter[FGutterBandNumbers].Left;
-      RectNums.Right:= FGutter[FGutterBandNumbers].Right;
-      RectNums.Top:= FRectMain.Top;
-      RectNums.Bottom:= FRectMain.Bottom;
-
-      bOnGutterNumbers:= bOnGutter and PtInRect(RectNums, P);
-    end;
-
-    if FGutter[FGutterBandBookmarks].Visible then
-    begin
-      RectBookmk.Left:= FGutter[FGutterBandBookmarks].Left;
-      RectBookmk.Right:= FGutter[FGutterBandBookmarks].Right;
-      RectBookmk.Top:= FRectMain.Top;
-      RectBookmk.Bottom:= FRectMain.Bottom;
-
-      bOnGutterBookmk:= bOnGutter and PtInRect(RectBookmk, P);
-    end;
   end;
 
   //detect cursor on folded marks
@@ -6553,11 +6636,13 @@ end;
 function TATSynEdit.DoMouseWheelAction(Shift: TShiftState;
   AWheelDelta: integer; AForceHorz: boolean): boolean;
 var
+  WheelRecord: TATEditorWheelRecord;
   Mode: TATMouseWheelMode;
   Pnt: TPoint;
 begin
   Result:= false;
   if not OptMouseEnableAll then exit;
+  if ModeOneLine then exit;
   DoHideAllTooltips;
 
   if AForceHorz then
@@ -6576,30 +6661,33 @@ begin
   else
     exit;
 
+  WheelRecord:= Default(TATEditorWheelRecord);
+
   case Mode of
     aWheelModeNormal:
       begin
-        if (not ModeOneLine) and FOptMouseWheelScrollVert then
+        if FOptMouseWheelScrollVert then
         begin
-          //w/o this handler wheel works only with OS scrollbars, need with new scrollbars too
-          DoScrollByDeltaInPixels(
-            0,
-            FCharSize.Y * -FOptMouseWheelScrollVertSpeed * AWheelDelta div 120
-            );
+          WheelRecord.Kind:= wqkVert;
+          WheelRecord.Delta:= AWheelDelta;
+          //FWheelQueue.Push(WheelRecord);
+          DoHandleWheelRecord(WheelRecord);
           Update;
+
           Result:= true;
         end;
       end;
 
     aWheelModeHoriz:
       begin
-        if (not ModeOneLine) and FOptMouseWheelScrollHorz then
+        if FOptMouseWheelScrollHorz then
         begin
-          DoScrollByDelta(
-            -FOptMouseWheelScrollHorzSpeed * AWheelDelta div 120,
-            0
-            );
-          Invalidate;
+          WheelRecord.Kind:= wqkHorz;
+          WheelRecord.Delta:= AWheelDelta;
+          //FWheelQueue.Push(WheelRecord);
+          DoHandleWheelRecord(WheelRecord);
+          Update;
+
           Result:= true;
         end;
       end;
@@ -6608,8 +6696,12 @@ begin
       begin
         if FOptMouseWheelZooms then
         begin
-          DoScaleFontDelta(AWheelDelta>0);
-          DoEventZoom;
+          WheelRecord.Kind:= wqkZoom;
+          WheelRecord.Delta:= AWheelDelta;
+          //FWheelQueue.Push(WheelRecord);
+          DoHandleWheelRecord(WheelRecord);
+          Update;
+
           Result:= true;
         end;
       end;
@@ -6745,16 +6837,16 @@ begin
   if not IsRepaintEnabled then exit;
   //if not IsInvalidateAllowed then exit;
 
-  if OptEditorFlickerReducingPause>=1000 then
+  if ATEditorOptions.FlickerReducingPause>=1000 then
   begin
     if Assigned(AdapterForHilite) then
       if not AdapterForHilite.IsDataReadyPartially then exit;
   end
   else
-  if OptEditorFlickerReducingPause>0 then
+  if ATEditorOptions.FlickerReducingPause>0 then
   begin
     FTimerFlicker.Enabled:= false;
-    FTimerFlicker.Interval:= OptEditorFlickerReducingPause;
+    FTimerFlicker.Interval:= ATEditorOptions.FlickerReducingPause;
     FTimerFlicker.Enabled:= true;
     exit;
   end;
@@ -6815,13 +6907,13 @@ begin
 
   case FMouseAutoScroll of
     cDirUp:
-      DoScrollByDelta(0, -cSpeedScrollAutoVert);
+      DoScrollByDelta(0, -ATEditorOptions.SpeedScrollAutoVert);
     cDirDown:
-      DoScrollByDelta(0, cSpeedScrollAutoVert);
+      DoScrollByDelta(0, ATEditorOptions.SpeedScrollAutoVert);
     cDirLeft:
-      DoScrollByDelta(-cSpeedScrollAutoHorz, 0);
+      DoScrollByDelta(-ATEditorOptions.SpeedScrollAutoHorz, 0);
     cDirRight:
-      DoScrollByDelta(cSpeedScrollAutoHorz, 0);
+      DoScrollByDelta(ATEditorOptions.SpeedScrollAutoHorz, 0);
     else
       Exit;
   end;
@@ -6896,12 +6988,41 @@ begin
   Invalidate;
 end;
 
+
 procedure TATSynEdit.DoPaintCarets(C: TCanvas; AWithInvalidate: boolean);
 var
   Caret: TATCaretItem;
   CaretShape: TATCaretShape;
   NCaretColor: TColor;
   R: TRect;
+  //
+  procedure DoPaintCaretShape;
+  var
+    NCoordX, NCoordY: integer;
+  begin
+    CanvasInvertRect(C, R, NCaretColor);
+
+    if CaretShape.EmptyInside then
+      CanvasInvertRect(C, Rect(R.Left+1, R.Top+1, R.Right-1, R.Bottom-1), NCaretColor)
+    else
+    if ATEditorOptions.CaretTextOverInvertedRect then
+    begin
+      if (Caret.CharStr<>'') and (Caret.CharColor<>clNone) and not IsCharUnicodeSpace(Caret.CharStr[1]) then
+      begin
+        C.Font.Color:= Caret.CharColor;
+        C.Font.Style:= Caret.CharStyles;
+        C.Brush.Style:= bsClear;
+        NCoordX:= Caret.CoordX;
+        NCoordY:= Caret.CoordY;
+        if OptSpacingY<0 then
+          Inc(NCoordY, OptSpacingY);
+        CanvasTextOutSimplest(C, NCoordX, NCoordY, Caret.CharStr);
+      end;
+    end;
+  end;
+  //
+var
+  NCharWidth: integer;
   i: integer;
 begin
   if csLoading in ComponentState then exit;
@@ -6939,13 +7060,15 @@ begin
   else
     FCaretShown:= true;
 
+  NCharWidth:= FCharSize.XScaled div ATEditorCharXScale;
+
   for i:= 0 to FCarets.Count-1 do
   begin
     Caret:= FCarets[i];
     if Caret.CoordX=-1 then Continue;
     R.Left:= Caret.CoordX;
     R.Top:= Caret.CoordY;
-    R.Right:= R.Left+FCharSize.X;
+    R.Right:= R.Left+NCharWidth;
     R.Bottom:= R.Top+FCharSize.Y;
 
     //check caret is visible (IntersectRect is slower)
@@ -6954,7 +7077,7 @@ begin
     if R.Left>=FRectMain.Right then Continue;
     if R.Top>=FRectMain.Bottom then Continue;
 
-    DoCaretsApplyShape(R, CaretShape, FCharSize.X, FCharSize.Y);
+    DoCaretsApplyShape(R, CaretShape, NCharWidth, FCharSize.Y);
 
     if FCaretBlinkEnabled then
     begin
@@ -6970,26 +7093,11 @@ begin
         end;
       end;
 
-      CanvasInvertRect(C, R, NCaretColor);
-      //if shape FrameFull, invert inner area
-      if CaretShape.EmptyInside then
-        CanvasInvertRect(C, Rect(R.Left+1, R.Top+1, R.Right-1, R.Bottom-1), NCaretColor);
+      DoPaintCaretShape;
     end
     else
     begin
-      if FOptCaretPaintNonBlinkingSimpler then
-      begin
-        //paint non-blinking caret simpler
-        C.Brush.Color:= NCaretColor;
-        C.FillRect(R);
-      end
-      else
-      begin
-        CanvasInvertRect(C, R, NCaretColor);
-        //if shape FrameFull, invert inner area
-        if CaretShape.EmptyInside then
-          CanvasInvertRect(C, Rect(R.Left+1, R.Top+1, R.Right-1, R.Bottom-1), NCaretColor);
-      end;
+      DoPaintCaretShape;
     end;
 
     Caret.OldRect:= R;
@@ -7047,7 +7155,7 @@ end;
 
 procedure TATSynEdit.DoPaintLineIndent(C: TCanvas;
   const ARect: TRect;
-  ACharSize: TPoint;
+  const ACharSize: TATEditorCharSize;
   ACoordY: integer;
   AIndentSize: integer;
   AColorBG: TColor;
@@ -7059,8 +7167,8 @@ var
 begin
   if AIndentSize=0 then Exit;
 
-  RBack:= Rect(0, 0, AIndentSize*ACharSize.X, ACharSize.Y);
-  OffsetRect(RBack, ARect.Left-AScrollPos*ACharSize.X, ACoordY);
+  RBack:= Rect(0, 0, AIndentSize*ACharSize.XScaled div ATEditorCharXScale, ACharSize.Y);
+  OffsetRect(RBack, ARect.Left-AScrollPos*ACharSize.XScaled div ATEditorCharXScale, ACoordY);
 
   C.Brush.Color:= AColorBG;
   C.FillRect(RBack);
@@ -7070,13 +7178,13 @@ begin
       if i mod FTabSize = 0 then
         CanvasLine_DottedVertAlt(C,
           Colors.IndentVertLines,
-          ARect.Left + (i-AScrollPos)*ACharSize.X,
+          ARect.Left + (i-AScrollPos)*ACharSize.XScaled div ATEditorCharXScale,
           ACoordY,
           ACoordY+ACharSize.Y);
 end;
 
 procedure TATSynEdit.DoPaintSelectedLineBG(C: TCanvas;
-  ACharSize: TPoint;
+  const ACharSize: TATEditorCharSize;
   const AVisRect: TRect;
   APointLeft, APointText: TPoint;
   const AWrapItem: TATWrapItem;
@@ -7096,8 +7204,8 @@ begin
    if FWrapMode=cWrapOff then
     if (NLineIndex>=FSelRect.Top) and (NLineIndex<=FSelRect.Bottom) then
     begin
-      NLeft:= APointLeft.X+ACharSize.X*(FSelRect.Left-AScrollHorz.NPos);
-      NRight:= NLeft+ACharSize.X*FSelRect.Width;
+      NLeft:= APointLeft.X+ACharSize.XScaled*(FSelRect.Left-AScrollHorz.NPos) div ATEditorCharXScale;
+      NRight:= NLeft+ACharSize.XScaled*FSelRect.Width div ATEditorCharXScale;
       NLeft:= Max(NLeft, APointText.X+ALineWidth);
       if (NLeft<NRight) then
       begin
@@ -7131,11 +7239,11 @@ begin
         if (AWrapItem.NFinal=cWrapItemMiddle) then
           Continue;
 
-      NLeft:= APointText.X + ALineWidth + (RangeFrom-NPartXAfter)*ACharSize.X;
+      NLeft:= APointText.X + ALineWidth + (RangeFrom-NPartXAfter)*ACharSize.XScaled div ATEditorCharXScale;
       if RangeTo=MaxInt then
         NRight:= AVisRect.Right
       else
-        NRight:= NLeft+(RangeTo-RangeFrom)*ACharSize.X;
+        NRight:= NLeft+(RangeTo-RangeFrom)*ACharSize.XScaled div ATEditorCharXScale;
 
       C.Brush.Color:= Colors.TextSelBG;
       C.FillRect(
@@ -7182,7 +7290,7 @@ procedure TATSynEdit.DoPaintGutterNumber(C: TCanvas; ALineIndex, ACoordTop: inte
       taLeftJustify:
         P.X:= ABand.Left + FNumbersIndent;
       taRightJustify:
-        P.X:= ABand.Right - FNumbersIndent - FCharSize.X div 2;
+        P.X:= ABand.Right - FNumbersIndent - FCharSize.XScaled div ATEditorCharXScale div 2;
       taCenter:
         P.X:= (ABand.Left+ABand.Right) div 2;
     end;
@@ -7215,12 +7323,12 @@ begin
 
     '-':
       begin
-        PaintDash(FCharSize.X, EditorScale(2));
+        PaintDash(FCharSize.XScaled div ATEditorCharXScale, EditorScale(2));
       end;
 
     else
       begin
-        NW:= FCharSize.X*Length(SText);
+        NW:= FCharSize.XScaled * Length(SText) div ATEditorCharXScale;
 
         P.Y:= ACoordTop;
 
@@ -7512,6 +7620,7 @@ var
   Relation: TATPosRelation;
   Details: TATEditorPosDetails;
 begin
+  if ModeReadOnly then exit;
   St:= Strings;
   if Carets.Count<>1 then Exit; //allow only 1 caret
   Carets[0].GetRange(X1, Y1, X2, Y2, bSel);
@@ -7761,7 +7870,7 @@ begin
   Strings.UndoAsString:= AValue;
 end;
 
-procedure TATSynEdit.DoScaleFontDelta(AInc: boolean);
+procedure TATSynEdit.DoScaleFontDelta(AInc: boolean; AllowUpdate: boolean);
 const
   cMinScale = 60;
   cStep = 10;
@@ -7781,7 +7890,9 @@ begin
   //NTop:= LineTop;
   FOptScaleFont:= FOptScaleFont+cStep*BoolToPlusMinusOne[AInc];
   //LineTop:= NTop;
-  Update;
+
+  if AllowUpdate then
+    Update;
 end;
 
 procedure TATSynEdit.BeginUpdate; inline;
@@ -8257,8 +8368,10 @@ begin
     CanvasLineEx(C, AColor, FOptStapleStyle, R.Left, R.Bottom, R.Right, R.Bottom, true);
 end;
 
-procedure TATSynEdit.DoPaintStaples(C: TCanvas; const ARect: TRect;
-  ACharSize: TPoint; const AScrollHorz: TATEditorScrollInfo);
+procedure TATSynEdit.DoPaintStaples(C: TCanvas;
+  const ARect: TRect;
+  const ACharSize: TATEditorCharSize;
+  const AScrollHorz: TATEditorScrollInfo);
 var
   St: TATStrings;
   nLineFrom, nLineTo, nRangeDeepest, nMaxHeight: integer;
@@ -8321,12 +8434,12 @@ begin
     else
       nIndent:= nIndentBegin;
 
-    Inc(P1.X, nIndent*ACharSize.X);
-    Inc(P2.X, nIndent*ACharSize.X);
+    Inc(P1.X, nIndent*ACharSize.XScaled div ATEditorCharXScale);
+    Inc(P2.X, nIndent*ACharSize.XScaled div ATEditorCharXScale);
 
     RSt.Left:= P1.X + FOptStapleIndent;
     RSt.Top:= P1.Y;
-    RSt.Right:= RSt.Left+ (ACharSize.X * FOptStapleWidthPercent div 100);
+    RSt.Right:= RSt.Left+ (ACharSize.XScaled * FOptStapleWidthPercent div ATEditorCharXScale div 100);
     RSt.Bottom:= P2.Y + ACharSize.Y-1;
 
     if (RSt.Left>=ARect.Left) and
@@ -8594,7 +8707,8 @@ begin
     (not ModeReadOnly) and
     (not ModeOneLine) and
     (Source is TATSynEdit) and
-    ((Source as TATSynEdit).TextSelected<>'');
+    (TATSynEdit(Source).Carets.Count>0) and
+    (TATSynEdit(Source).Carets[0].IsSelection);
 end;
 
 procedure TATSynEdit.DragDrop(Source: TObject; X, Y: Integer);
@@ -8605,7 +8719,7 @@ var
 begin
   if not (Source is TATSynEdit) then exit;
   if (Source=Self) then exit;
-  SText:= (Source as TATSynedit).TextSelected;
+  SText:= TATSynEdit(Source).TextSelected;
   if SText='' then exit;
 
   Pnt:= ClientPosToCaretPos(Point(X, Y), Details);
@@ -8613,12 +8727,13 @@ begin
   begin
     DoCaretSingle(Pnt.X, Pnt.Y);
     DoCommand(cCommand_TextInsert, cInvokeInternal, SText);
-    if OptMouseDragDropFocusesTargetEditor then
+    if ATEditorOptions.MouseDragDropFocusesTargetEditor then
       SetFocus;
 
-    //Ctrl not pressed: delete block from src
-    if FOptMouseDragDropCopyingWithState in GetKeyShiftState then
-      (Source as TATSynedit).DoCommand(cCommand_TextDeleteSelection, cInvokeInternal);
+    //Ctrl is pressed: delete block from src
+    //note: it's opposite to the drag-drop in the single document
+    if GetActualDragDropIsCopying then
+      TATSynEdit(Source).DoCommand(cCommand_TextDeleteSelection, cInvokeInternal);
   end;
 end;
 
@@ -8853,7 +8968,7 @@ begin
     TextOutProps.LineIndex:= WrapItem.NLineIndex;
     TextOutProps.CharIndexInLine:= WrapItem.NCharIndex;
     CanvasTextOut(C,
-      cSizeIndentTooltipX + WrapItem.NIndent*FCharSize.X,
+      cSizeIndentTooltipX + WrapItem.NIndent*FCharSize.XScaled div ATEditorCharXScale,
       cSizeIndentTooltipY + FCharSize.Y*(NLine-ALineFrom),
       SText,
       @FParts,
@@ -9610,6 +9725,48 @@ begin
   if bClear then
     FillChar(FFoldbarCache[0], SizeOf(TATFoldBarProps)*NCount, 0);
 end;
+
+procedure TATSynEdit.DoHandleWheelRecord(const ARec: TATEditorWheelRecord);
+begin
+  case ARec.Kind of
+    wqkVert:
+      begin
+        //w/o this handler wheel works only with OS scrollbars, need with new scrollbars too
+        DoScrollByDeltaInPixels(
+          0,
+          FCharSize.Y * -FOptMouseWheelScrollVertSpeed * ARec.Delta div 120
+          );
+      end;
+
+    wqkHorz:
+      begin
+        DoScrollByDelta(
+          -FOptMouseWheelScrollHorzSpeed * ARec.Delta div 120,
+          0
+          );
+      end;
+
+    wqkZoom:
+      begin
+        DoScaleFontDelta(ARec.Delta>0, false);
+        DoEventZoom;
+      end;
+  end;
+end;
+
+{
+procedure TATSynEdit.DoHandleWheelQueue;
+var
+  Rec: TATEditorWheelRecord;
+begin
+  while FWheelQueue.Size()>0 do
+  begin
+    Rec:= FWheelQueue.Front;
+    FWheelQueue.Pop();
+    DoHandleWheelRecord(Rec);
+  end;
+end;
+}
 
 
 {$I atsynedit_carets.inc}

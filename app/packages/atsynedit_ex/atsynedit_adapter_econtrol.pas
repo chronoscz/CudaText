@@ -118,6 +118,7 @@ type
       out ATokenString, ATokenStyle: string; out ATokenKind: TATTokenKind);
     procedure __GetTokenAtPos(APos: TPoint; out APntFrom, APntTo: TPoint;
       out ATokenString, ATokenStyle: string; out ATokenKind: TATTokenKind);
+    function GetTokenStyleAtPos(APos: TPoint): TecSyntaxFormat;
     function GetTokenKindAtPos(APos: TPoint): TATTokenKind;
     function GetTokenString(const token: PecSyntToken): string;
     procedure GetTokenProps(const token: PecSyntToken; out APntFrom, APntTo: TPoint;
@@ -145,6 +146,8 @@ type
       AMainText: boolean); override;
     procedure OnEditorCalcPosColor(Sender: TObject;
       AX, AY: integer; var AColor: TColor); override;
+    procedure OnEditorCalcPosForeground(Sender: TObject;
+      AX, AY: integer; var AColor: TColor; var AFontStyles: TFontStyles); override;
     function IsParsedAtLeastPartially: boolean; override;
     function GetLexerName: string; override;
     function IsDataReady: boolean; override;
@@ -180,8 +183,6 @@ const
     );
 
 procedure ApplyPartStyleFromEcontrolStyle(var part: TATLinePart; st: TecSyntaxFormat); inline;
-var
-  NStyles: byte;
 begin
   if st.FormatType in [ftCustomFont, ftFontAttr, ftColor, ftBackGround] then
   begin
@@ -198,14 +199,7 @@ begin
     end;
     if st.FormatType in [ftCustomFont, ftFontAttr] then
     begin
-      NStyles:= 0;
-      if fsBold in st.Font.Style then
-        NStyles:= NStyles or afsFontBold;
-      if fsItalic in st.Font.Style then
-        NStyles:= NStyles or afsFontItalic;
-      if fsStrikeOut in st.Font.Style then
-        NStyles:= NStyles or afsFontCrossed;
-      part.FontStyles:= NStyles;
+      part.FontStyles:= ConvertFontStylesToInteger(st.Font.Style);
     end;
   end;
 
@@ -748,12 +742,11 @@ begin
 end;
 
 
-function TATAdapterEControl.GetTokenKindAtPos(APos: TPoint): TATTokenKind;
+function TATAdapterEControl.GetTokenStyleAtPos(APos: TPoint): TecSyntaxFormat;
 var
-  Style: TecSyntaxFormat;
   n: integer;
 begin
-  Result:= atkOther;
+  Result:= nil;
 
   if AnClient=nil then exit;
   if Buffer=nil then exit;
@@ -764,13 +757,41 @@ begin
   AnClient.CriSecForData.Enter;
   try
     if not AnClient.PublicData.Tokens.IsIndexValid(n) then exit;
-    Style:= AnClient.PublicData.Tokens._GetItemPtr(n)^.Style;
-    if Assigned(Style) then
-      Result:= TATTokenKind(Style.TokenKind);
+    Result:= AnClient.PublicData.Tokens._GetItemPtr(n)^.Style;
   finally
     AnClient.CriSecForData.Leave;
   end;
 end;
+
+function TATAdapterEControl.GetTokenKindAtPos(APos: TPoint): TATTokenKind;
+var
+  Style: TecSyntaxFormat;
+begin
+  Style:= GetTokenStyleAtPos(APos);
+  if Assigned(Style) then
+    Result:= TATTokenKind(Style.TokenKind)
+  else
+    Result:= atkOther;
+end;
+
+procedure TATAdapterEControl.OnEditorCalcPosForeground(Sender: TObject;
+  AX, AY: integer; var AColor: TColor; var AFontStyles: TFontStyles);
+var
+  Style: TecSyntaxFormat;
+begin
+  Style:= GetTokenStyleAtPos(Point(AX, AY));
+  if Assigned(Style) then
+  begin
+    AColor:= Style.Font.Color;
+    AFontStyles:= Style.Font.Style;
+  end
+  else
+  begin
+    AColor:= clNone;
+    AFontStyles:= [];
+  end;
+end;
+
 
 function TATAdapterEControl.GetRangeParent(const R: TecTextRange): TecTextRange;
 //cannot use R.Parent!
@@ -996,8 +1017,13 @@ begin
     if Range.Range.StartPos<0 then exit;
     AStart:= Range.Range.PointStart;
     AEnd:= Range.Range.PointEnd;
-    if Assigned(Range.Rule) and Assigned(Range.Rule.SyntAnalyzer) then
-      ALexerName:= Range.Rule.SyntAnalyzer.LexerName;
+
+    // before we had the Range.FinalSubAnalyzer:
+    //if Assigned(Range.Rule) and Assigned(Range.Rule.SyntAnalyzer) then
+    //  ALexerName:= Range.Rule.SyntAnalyzer.LexerName;
+
+    if Assigned(Range.FinalSubAnalyzer) then
+      ALexerName:= Range.FinalSubAnalyzer.LexerName;
   end;
 end;
 

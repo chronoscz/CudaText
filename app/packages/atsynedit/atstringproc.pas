@@ -12,6 +12,7 @@ interface
 uses
   Classes, SysUtils, StrUtils,
   LCLType, LCLIntf, Clipbrd,
+  ATSynEdit_Options,
   ATSynEdit_UnicodeData,
   ATSynEdit_RegExpr,
   ATSynEdit_CharSizer;
@@ -20,6 +21,20 @@ type
   atString = UnicodeString;
   atChar = WideChar;
   PatChar = PWideChar;
+
+const
+  ATEditorCharXScale = 1024;
+
+type
+  TATEditorCharSize = record
+    //what is XScaled? it is the char-width, multiplied by ATEditorCharXScale and truncated.
+    //on win32/gtk/qt, XScaled is multiple of ATEditorCharXScale; but not on macOS.
+    //macOS has actually floating-number font width, e.g. 7.801 pixels of a single char in monospaced fonts
+    //(all ASCII chars have the same width, tested).
+    XScaled: Int64;
+    //macOS char-height is decimal-number.
+    Y: Int64;
+  end;
 
 type
   TATLineChangeKind = (
@@ -93,13 +108,6 @@ var
 function EditorScale(AValue: integer): integer; inline;
 function EditorScaleFont(AValue: integer): integer;
 
-var
-  OptEmojiWidthPercents: integer = 210;
-  OptMaxTabPositionToExpand: integer = 500; //no sense to expand too far tabs
-  OptMinWordWrapOffset: integer = 3;
-  OptCommaCharsWrapWithWords: UnicodeString = '.,;:''"`~?!&%$';
-  OptMaxLineLenForAccurateCharWidths: integer = 500; //must be <= cMaxFixedArray
-
 type
   TATStringTabCalcEvent = function(Sender: TObject; ALineIndex, ACharIndex: integer): integer of object;
   TATStringGetLenEvent = function(ALineIndex: integer): integer of object;
@@ -134,11 +142,16 @@ type
       const ANonWordChars: atString; AWrapIndented: boolean): integer;
     function FindClickedPosition(ALineIndex: integer; const Str: atString;
       constref ListOffsets: TATIntFixedArray;
-      APixelsFromLeft, ACharSize: Int64;
+      APixelsFromLeft: Int64;
+      const ACharSize: TATEditorCharSize;
       AAllowVirtualPos: boolean;
       out AEndOfLinePos: boolean): Int64;
-    procedure FindOutputSkipOffset(ALineIndex: integer; const S: atString;
-      AScrollPos: Int64; out ACharsSkipped: Int64; out ACellPercentsSkipped: Int64);
+    procedure FindOutputSkipOffset(ALineIndex: integer;
+      const S: atString;
+      const AScrollPosSmooth: Int64;
+      const ACharSizeXScaled: Int64;
+      out ACharsSkipped: Int64;
+      out ACellPercentsSkipped: Int64);
   end;
 
 function IsCharEol(ch: widechar): boolean; inline;
@@ -403,7 +416,7 @@ function TATStringTabHelper.FindWordWrapOffset(ALineIndex: integer; const S: atS
   //to wrap them with wordchars
   function _IsWord(ch: widechar): boolean; inline;
   begin
-    if Pos(ch, OptCommaCharsWrapWithWords)>0 then
+    if Pos(ch, ATEditorOptions.CommaCharsWrapWithWords)>0 then
       Result:= true
     else
       Result:= IsCharWord(ch, ANonWordChars);
@@ -415,7 +428,7 @@ var
 begin
   if S='' then
     Exit(0);
-  if AColumns<OptMinWordWrapOffset then
+  if AColumns<ATEditorOptions.MinWordWrapOffset then
     Exit(AColumns);
 
   CalcCharOffsets(ALineIndex, S, Offsets);
@@ -427,8 +440,8 @@ begin
   N:= Min(Length(S), cMaxFixedArray)-1;
   while (N>0) and (Offsets.Data[N]>(AColumns+1)*100) do Dec(N);
   NAvg:= N;
-  if NAvg<OptMinWordWrapOffset then
-    Exit(OptMinWordWrapOffset);
+  if NAvg<ATEditorOptions.MinWordWrapOffset then
+    Exit(ATEditorOptions.MinWordWrapOffset);
 
   //find correct offset: not allowed at edge
   //a) 2 wordchars,
@@ -517,10 +530,10 @@ begin
   if Assigned(OnCalcTabSize) then
     Result:= OnCalcTabSize(SenderObj, ALineIndex, APos)
   else
-  if Assigned(OnCalcLineLen) and (OnCalcLineLen(ALineIndex)>OptMaxLineLenForAccurateCharWidths) then
+  if Assigned(OnCalcLineLen) and (OnCalcLineLen(ALineIndex)>ATEditorOptions.MaxLineLenForAccurateCharWidths) then
     Result:= 1
   else
-  if APos>OptMaxTabPositionToExpand then
+  if APos>ATEditorOptions.MaxTabPositionToExpand then
     Result:= 1
   else
     Result:= TabSize - (APos-1) mod TabSize;
@@ -600,7 +613,7 @@ begin
   //NPairSize:= 0;
   //StrPair:= 'ab';
 
-  if NLen>OptMaxLineLenForAccurateCharWidths then
+  if NLen>ATEditorOptions.MaxLineLenForAccurateCharWidths then
   begin
     for i:= 0 to NLen-1 do
       AInfo.Data[i]:= (Int64(i)+1)*100;
@@ -630,7 +643,7 @@ begin
     }
     if IsCharSurrogateAny(ch) then
     begin
-      NScalePercents:= OptEmojiWidthPercents div 2;
+      NScalePercents:= ATEditorOptions.EmojiWidthPercents div 2;
     end
     else
     begin
@@ -666,7 +679,7 @@ begin
   NLen:= Length(S);
   if NLen=0 then Exit;
 
-  if NLen>OptMaxLineLenForAccurateCharWidths then
+  if NLen>ATEditorOptions.MaxLineLenForAccurateCharWidths then
     exit(NLen*100);
 
   NCharsSkipped:= ACharsSkipped;
@@ -678,7 +691,7 @@ begin
 
     if IsCharSurrogateAny(ch) then
     begin
-      NScalePercents:= OptEmojiWidthPercents div 2;
+      NScalePercents:= ATEditorOptions.EmojiWidthPercents div 2;
     end
     else
     begin
@@ -701,7 +714,10 @@ end;
 
 function TATStringTabHelper.FindClickedPosition(ALineIndex: integer; const Str: atString;
   constref ListOffsets: TATIntFixedArray;
-  APixelsFromLeft, ACharSize: Int64; AAllowVirtualPos: boolean; out AEndOfLinePos: boolean): Int64;
+  APixelsFromLeft: Int64;
+  const ACharSize: TATEditorCharSize;
+  AAllowVirtualPos: boolean;
+  out AEndOfLinePos: boolean): Int64;
 var
   i: integer;
 begin
@@ -710,7 +726,7 @@ begin
   begin
     Result:= 1;
     if AAllowVirtualPos then
-      Inc(Result, APixelsFromLeft div ACharSize);
+      Inc(Result, APixelsFromLeft * ATEditorCharXScale div ACharSize.XScaled);
     Exit;
   end;
 
@@ -719,7 +735,7 @@ begin
 
   //positions of each char end
   for i:= 0 to ListOffsets.Len-1 do
-    ListEnds.Data[i]:= ListOffsets.Data[i]*ACharSize div 100;
+    ListEnds.Data[i]:= ListOffsets.Data[i]*ACharSize.XScaled div ATEditorCharXScale div 100;
 
   //positions of each char middle
   for i:= 0 to ListOffsets.Len-1 do
@@ -742,7 +758,7 @@ begin
 
   AEndOfLinePos:= true;
 
-  Result:= ListEnds.Len + (APixelsFromLeft - ListEnds.Data[ListEnds.Len-1]) div ACharSize + 1;
+  Result:= ListEnds.Len + (APixelsFromLeft - ListEnds.Data[ListEnds.Len-1]) * ATEditorCharXScale div ACharSize.XScaled + 1;
   ////this works
   ////a) better if clicked after line end, far
   ////b) bad if clicked exactly on line end (shifted to right by 1)
@@ -752,19 +768,26 @@ begin
     Result:= Min(Result, Length(Str)+1);
 end;
 
-procedure TATStringTabHelper.FindOutputSkipOffset(ALineIndex: integer; const S: atString;
-  AScrollPos: Int64; out ACharsSkipped: Int64; out ACellPercentsSkipped: Int64);
+procedure TATStringTabHelper.FindOutputSkipOffset(ALineIndex: integer;
+  const S: atString;
+  const AScrollPosSmooth: Int64;
+  const ACharSizeXScaled: Int64;
+  out ACharsSkipped: Int64;
+  out ACellPercentsSkipped: Int64);
 var
   Offsets: TATIntFixedArray;
+  NCheckedOffset: Int64;
 begin
   ACharsSkipped:= 0;
   ACellPercentsSkipped:= 0;
-  if (S='') or (AScrollPos=0) then Exit;
+  if (S='') or (AScrollPosSmooth=0) then Exit;
 
   CalcCharOffsets(ALineIndex, S, Offsets);
 
+  NCheckedOffset:= AScrollPosSmooth * 100 * ATEditorCharXScale div ACharSizeXScaled;
+
   while (ACharsSkipped<Offsets.Len) and
-    (Offsets.Data[ACharsSkipped] < AScrollPos*100) do
+    (Offsets.Data[ACharsSkipped] < NCheckedOffset) do
     Inc(ACharsSkipped);
 
   if (ACharsSkipped>0) then

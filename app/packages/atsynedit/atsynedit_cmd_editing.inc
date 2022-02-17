@@ -186,13 +186,14 @@ begin
   end;
 end;
 
-function TATSynEdit.DoCommand_TextDeleteLeft(ALen: integer; AAllowUnindent: boolean): TATCommandResults;
+function TATSynEdit.DoCommand_TextDeleteLeft(ADeleteLen: integer; AAllowUnindent: boolean): TATCommandResults;
 var
   Caret: TATCaretItem;
   St: TATStrings;
   Shift, PosAfter: TPoint;
   NIndent, NDeleteLen: integer;
   bNeedGroup: boolean;
+  ch: WideChar;
   i: integer;
 begin
   Result:= [];
@@ -213,7 +214,8 @@ begin
   for i:= 0 to Carets.Count-1 do
   begin
     Caret:= Carets[i];
-    NDeleteLen:= ALen;
+    if not St.IsIndexValid(Caret.PosY) then Continue;
+    NDeleteLen:= ADeleteLen;
 
     if AAllowUnindent then
     begin
@@ -223,6 +225,14 @@ begin
           NDeleteLen:= Caret.PosX-NIndent
         else
           NDeleteLen:= Caret.PosX;
+    end;
+
+    //handle deletion of emoji (2 surrogate chars: high+low)
+    if Caret.PosX>1 then
+    begin
+      ch:= St.LineCharAt(Caret.PosY, Caret.PosX);
+      if IsCharSurrogateLow(ch) then
+        Inc(NDeleteLen);
     end;
 
     St.TextDeleteLeft(Caret.PosX, Caret.PosY, NDeleteLen, Shift, PosAfter, FOptKeyBackspaceGoesToPrevLine);
@@ -339,13 +349,15 @@ begin
 end;
 
 
-function TATSynEdit.DoCommand_TextDeleteRight(ALen: integer): TATCommandResults;
+function TATSynEdit.DoCommand_TextDeleteRight(ADeleteLen: integer): TATCommandResults;
 var
   Caret: TATCaretItem;
   St: TATStrings;
-  i, Len, ShiftBelowX: integer;
+  NLineLen, NDeleteLen, ShiftBelowX: integer;
   Shift, PosAfter: TPoint;
   bNeedGroup: boolean;
+  ch: WideChar;
+  i: integer;
 begin
   Result:= [];
   if ModeReadOnly then Exit;
@@ -362,17 +374,25 @@ begin
   if bNeedGroup then
     St.BeginUndoGroup;
 
-  for i:= 0 to FCarets.Count-1 do
+  for i:= 0 to Carets.Count-1 do
   begin
-    Caret:= FCarets[i];
+    Caret:= Carets[i];
+    if not St.IsIndexValid(Caret.PosY) then Continue;
 
     //offsetX for carets in line[PosY+1]
     ShiftBelowX:= 0;
-    Len:= St.LinesLen[Caret.PosY];
-    if Caret.PosX=Len then
-      ShiftBelowX:= Len;
+    NLineLen:= St.LinesLen[Caret.PosY];
+    if Caret.PosX=NLineLen then
+      ShiftBelowX:= NLineLen;
 
-    St.TextDeleteRight(Caret.PosX, Caret.PosY, ALen, Shift, PosAfter);
+    NDeleteLen:= ADeleteLen;
+
+    //handle deletion of emoji (2 surrogate chars: high+low)
+    ch:= St.LineCharAt(Caret.PosY, Caret.PosX+1);
+    if IsCharSurrogateHigh(ch) then
+      Inc(NDeleteLen);
+
+    St.TextDeleteRight(Caret.PosX, Caret.PosY, NDeleteLen, Shift, PosAfter);
     DoCaretsShift(i, Caret.PosX, Caret.PosY, Shift.X, Shift.Y, PosAfter, ShiftBelowX);
     Caret.PosX:= PosAfter.X;
     Caret.PosY:= PosAfter.Y;

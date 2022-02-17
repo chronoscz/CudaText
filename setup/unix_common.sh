@@ -1,4 +1,5 @@
 #!/bin/sh
+set -x
 . ./cuda_ver.sh
 cd ../app
 

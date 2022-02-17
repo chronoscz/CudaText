@@ -39,7 +39,8 @@ type
     Command: integer;
     Name: string;
     Keys1, Keys2: TATKeyArray;
-    LexerSpecific: boolean;
+    LexerSpecific: boolean; //CudaText stores here True for lexer-specific keymaps
+    Description: string; //CudaText stores here 'pythonmodule,method,param'
     procedure Assign(AItem: TATKeymapItem);
     function ShortenedKeys1: TATKeyArray;
     function ShortenedKeys2: TATKeyArray;
@@ -62,7 +63,7 @@ type
     function Count: integer; inline;
     function IsIndexValid(N: integer): boolean; inline;
     property Items[N: integer]: TATKeymapItem read GetItem; default;
-    procedure Add(ACmd: integer; const AName: string; const AKeys1, AKeys2: array of string);
+    procedure Add(ACmd: integer; const AName: string; const AKeys1, AKeys2: array of string; const ADescription: string='');
     procedure Delete(N: integer);
     procedure Assign(AKeymap: TATKeyMap);
     function IndexOf(ACmd: integer): integer;
@@ -85,6 +86,7 @@ begin
   Name:= AItem.Name;
   Keys1:= AItem.Keys1;
   Keys2:= AItem.Keys2;
+  Description:= AItem.Description;
 end;
 
 function TATKeymapItem.ShortenedKeys1: TATKeyArray;
@@ -168,7 +170,7 @@ begin
 end;
 
 procedure TATKeymap.Add(ACmd: integer; const AName: string; const AKeys1,
-  AKeys2: array of string);
+  AKeys2: array of string; const ADescription: string);
 var
   Item: TATKeymapItem;
   i: integer;
@@ -176,6 +178,7 @@ begin
   Item:= TATKeymapItem.Create;
   Item.Command:= ACmd;
   Item.Name:= AName;
+  Item.Description:= ADescription;
 
   Item.Keys1.Clear;
   Item.Keys2.Clear;

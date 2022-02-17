@@ -89,7 +89,7 @@ begin
   NMax:= 1;
   NPage:= 1;
   NPixelOffset:= 0;
-  SmoothCharSize:= 1;
+  CharSizeScaled:= 1*ATEditorCharXScale;
   SmoothPos:= 0;
   SmoothPosLast:= 1;
   SmoothMax:= 1;
@@ -112,8 +112,8 @@ end;
 
 procedure TATEditorScrollInfo.SetNPos(const AValue: Int64);
 begin
-  if NPos_=AValue then Exit;
-  NPos_:= AValue;
+  if NPosInternal=AValue then Exit;
+  NPosInternal:= AValue;
 end;
 
 function TATEditorScrollInfo.TopGapVisible: boolean;
@@ -123,7 +123,7 @@ end;
 
 function TATEditorScrollInfo.TotalOffset: Int64;
 begin
-  Result:= NPos*SmoothCharSize + NPixelOffset;
+  Result:= NPos * CharSizeScaled div ATEditorCharXScale + NPixelOffset;
 end;
 
 class operator TATEditorScrollInfo.= (const A, B: TATEditorScrollInfo): boolean;

@@ -159,6 +159,7 @@ type
     Rule: TecSubAnalyzerRule;   // Rule reference
     CondEndPos: integer;      // Start pos of the start condition
     CondStartPos: integer;    // End pos of the end condition
+    FinalSubAnalyzer: TecSyntAnalyzer;
     class operator =(const a, b: TecSubLexerRange): boolean;
   end;
 
@@ -730,6 +731,10 @@ type
   { TLoadableComponent }
 
   TLoadableComponent = class(TComponent)
+  private type
+    TThemeMappingItem = record
+      StrFrom, StrTo: string;
+    end;
   private
     FSkipNewName: Boolean;
     FFileName: string;
@@ -742,7 +747,7 @@ type
     function NotStored: Boolean;
   private
     ThemeMappingCount: integer;
-    ThemeMappingArray: array[0..40] of record StrFrom, StrTo: string; end;
+    ThemeMappingArray: array[0..40] of TThemeMappingItem;
     SubLexerNames: array[0..12] of string;
   public
     CommentRangeBegin: string;
@@ -769,6 +774,12 @@ type
       var TokenLength: integer; var Rule: TecTokenRule) of object;
 
   TecParseProgressEvent = procedure(Sender: TObject; AProgress: integer) of object;
+
+  TecResolveAlias = function(const AAlias: string): TecSyntAnalyzer of object;
+
+  TecLexerApplyThemeEvent = function(
+    An: TecSyntAnalyzer;
+    out AnNotCorrect: TecSyntAnalyzer): boolean;
 
   TecSeparateBlocksMode = (sbmUnknown, sbmEnabled, sbmDisabled);
 
@@ -856,14 +867,11 @@ type
     procedure SetCollapseStyle(const Value: TecSyntaxFormat);
     }
     procedure SetNotes(const Value: TStrings);
-    procedure SetInternal(const Value: boolean);
-    procedure SetRestartFromLineStart(const Value: Boolean);
     procedure SetParseEndOfLine(const Value: Boolean);
     procedure TokenNamesChanged(Sender: TObject);
     procedure CompileGramma;
     procedure SetGrammar(const Value: TGrammaAnalyzer);
     procedure GrammaChanged(Sender: TObject);
-    procedure SetLineComment(const Value: ecString);
     procedure DetectBlockSeparate;
     procedure SetAlwaysSyncBlockAnal(const Value: Boolean);
     function GetSeparateBlocks: Boolean;
@@ -885,6 +893,7 @@ type
 
     SpecialKinds: array of boolean; //Alexey: holds True for each TokenKind for indent-based folding
     IndentBasedFolding: boolean; //Alexey
+    AppliedSyntaxTheme: string; //Alexey
 
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -936,10 +945,10 @@ type
     property SkipSpaces: Boolean read FSkipSpaces write SetSkipSpaces default True;
     property FullRefreshSize: integer read FFullRefreshSize write FFullRefreshSize default 0;
     property Notes: TStrings read FNotes write SetNotes;
-    property Internal: boolean read FInternal write SetInternal default False;
-    property RestartFromLineStart: Boolean read FRestartFromLineStart write SetRestartFromLineStart default False;
+    property Internal: boolean read FInternal write FInternal default False;
+    property RestartFromLineStart: Boolean read FRestartFromLineStart write FRestartFromLineStart default False;
     property ParseEndOfLine: Boolean read FParseEndOfLine write SetParseEndOfLine default False;
-    property LineComment: ecString read FLineComment write SetLineComment;
+    property LineComment: ecString read FLineComment write FLineComment;
     property Charset: TFontCharSet read FCharset write FCharset; // Alexey
     property AlwaysSyncBlockAnal: Boolean read FAlwaysSyncBlockAnal write SetAlwaysSyncBlockAnal default False;
     property IdleAppendDelay: Cardinal read FIdleAppendDelay write FIdleAppendDelay default 200;
@@ -1016,6 +1025,8 @@ type
 var
   EControlOptions: record
     OnLexerParseProgress: TecParseProgressEvent;
+    OnLexerResolveAlias: TecResolveAlias;
+    OnLexerApplyTheme: TecLexerApplyThemeEvent;
 
     MaxLinesWhenParserEnablesFolding: integer;
     //how much chars can take %sz0 format
@@ -1434,12 +1445,14 @@ end;
 
 procedure TecSingleTagCondition.SetTokenTypes(const Value: DWORD);
 begin
+  if FTokenTypes = Value then Exit;
   FTokenTypes := Value;
   Changed(False);
 end;
 
 procedure TecSingleTagCondition.SetCondType(const Value: TecTagConditionType);
 begin
+  if FCondType = Value then Exit;
   FCondType := Value;
   Changed(False);
 end;
@@ -1652,6 +1665,7 @@ end;
 
 procedure TecTagBlockCondition.SetBlockType(const Value: TecTagBlockType);
 begin
+  if FBlockType = Value then Exit;
   FBlockType := Value;
   if FBlockType in [btTagDetect, btLineBreak] then
    begin
@@ -2645,6 +2659,88 @@ begin
  end;
 end;
 
+
+function IsFencedChar(ch: WideChar): boolean; inline;
+begin
+  Result := (ch = '`') or (ch = '~');
+end;
+
+function FindFencedBlockAlias(const Src: UnicodeString; APos: integer): string; // Alexey
+const
+  cFencedNameChars = ['a'..'z', 'A'..'Z', '0'..'9', '_', '.', '-', '+', '#'];
+  cFencedNameLen = 20;
+var
+  SrcLen: integer;
+  //
+  procedure SkipSpaces;
+  begin
+    while (APos < SrcLen) and (Src[APos] = ' ') do
+      Inc(APos);
+  end;
+  //
+  procedure SkipWordChars;
+  begin
+    while (APos < SrcLen) and IsWordChar(Src[APos]) do
+      Inc(APos);
+  end;
+  //
+var
+  chW: WideChar;
+  chA: char;
+  MarkLen, PosEnd: integer;
+  ResultBuf: array[0..cFencedNameLen-1] of char;
+begin
+  Result := '';
+  SrcLen := Length(Src);
+  MarkLen := 0;
+  while (APos <= SrcLen) and IsFencedChar(Src[APos]) do
+  begin
+    Inc(MarkLen);
+    Inc(APos);
+  end;
+
+  // need 3+ backtick/tilde chars
+  if MarkLen < 3 then Exit;
+
+  SkipSpaces;
+
+  (*
+  // this is not needed yet, Markdown lexer also don't support this. 2021/12.
+  // marker can be:
+  //   ```lang
+  //   ``` lang
+  //   ``` { .lang .foo }
+  //   ``` { #id .lang .foo }
+  if (APos <= SrcLen) and (Src[APos] = '{') then
+  begin
+    Inc(APos);
+    SkipSpaces;
+    if (APos <= SrcLen) and (Src[APos] = '#') then
+    begin
+      Inc(APos);
+      SkipWordChars;
+      SkipSpaces;
+    end;
+    if (APos <= SrcLen) and (Src[APos] = '.') then
+      Inc(APos);
+  end;
+  *)
+
+  PosEnd := APos;
+  while PosEnd <= SrcLen do
+  begin
+    chW := Src[PosEnd];
+    if Ord(chW) > 127 then Break;
+    chA := char(Ord(chW));
+    if not (chA in cFencedNameChars) then Break;
+    if PosEnd-APos >= cFencedNameLen then Break;
+    ResultBuf[PosEnd-APos] := chA;
+    Inc(PosEnd);
+  end;
+
+  SetString(Result, ResultBuf, PosEnd-APos);
+end;
+
 // True if end of the text
 function TecParserResults.ExtractTag(var FPos: integer; ADisableFolding: Boolean): Boolean;
 var
@@ -2656,6 +2752,10 @@ var
    procedure GetOwner;
    var i, N: integer;
        Sub: PecSubLexerRange;
+       AnFinal: TecSyntAnalyzer;
+       MarkerPos: integer;
+       MarkerChar: WideChar;
+       MarkerStr: string;
    begin
     own := FOwner;
     for i := FSubLexerBlocks.Count - 1 downto 0 do
@@ -2665,16 +2765,40 @@ var
         if Sub.Range.EndPos = -1 then
           begin
             // try close sub lexer
-    //        if Rule.ToTextEnd then N := 0 else
+
+            // Alexey: detect fenced code-block
+            if Sub.FinalSubAnalyzer <> nil then
+              AnFinal := Sub.FinalSubAnalyzer
+            else
+            begin
+              AnFinal := Sub.Rule.SyntAnalyzer;
+              MarkerPos := Sub.CondStartPos + 1;
+              MarkerChar := Source[MarkerPos];
+              if IsFencedChar(MarkerChar) then
+              begin
+                MarkerStr := FindFencedBlockAlias(Source, MarkerPos);
+                if (MarkerStr <> '') and Assigned(EControlOptions.OnLexerResolveAlias) then
+                  AnFinal := EControlOptions.OnLexerResolveAlias(MarkerStr);
+              end;
+              Sub.FinalSubAnalyzer := AnFinal;
+            end;
+
+            //if Rule.ToTextEnd then N := 0 else
             N := Sub.Rule.MatchEnd(Source, FPos);
             if N > 0 then
              begin
                if Sub.Rule.IncludeBounds then
-                 begin // New mode in v2.35
+                 begin
                    Sub.Range.EndPos := FPos - 1 + N;
                    Sub.Range.PointEnd := FBuffer.StrToCaret(Sub.Range.EndPos);
                    Sub.CondEndPos := Sub.Range.EndPos;
-                   own := Sub.Rule.SyntAnalyzer;
+                   own := Sub.FinalSubAnalyzer;
+                   if own = nil then
+                   begin
+                     own := Sub.Rule.SyntAnalyzer;
+                     if own = nil then
+                       own := FOwner;
+                   end;
                  end else
                  begin
                    Sub.Range.EndPos := FPos - 1;
@@ -2683,17 +2807,28 @@ var
                  end;
                // Close ranges which belongs to this sub-lexer range
                CloseAtEnd(FTagList.PriorAt(Sub.Range.StartPos));
-               //FSubLexerBlocks[i] := Sub; // Write back to list //Alexey: not needed with pointer
              end else
              begin
-               own := Sub.Rule.SyntAnalyzer;
+               own := Sub.FinalSubAnalyzer;
+               if own = nil then
+               begin
+                 own := Sub.Rule.SyntAnalyzer;
+                 if own = nil then
+                   own := FOwner;
+               end;
                Exit;
              end;
           end else
        if FPos < Sub.Range.EndPos then
          begin
-               own := Sub.Rule.SyntAnalyzer;
-               Exit;
+           own := Sub.FinalSubAnalyzer;
+           if own = nil then
+           begin
+             own := Sub.Rule.SyntAnalyzer;
+             if own = nil then
+               own := FOwner;
+           end;
+           Exit;
          end;
     end;
    end;
@@ -2715,8 +2850,9 @@ var
    end;
 
    function CanOpen(Rule: TecSubAnalyzerRule): Boolean;
-   var N: integer;
+   var N, NCnt: integer;
        Sub: TecSubLexerRange;
+       SubPtr: PecSubLexerRange;
    begin
      Result := IsEnabled(Rule, False) and (Rule.SyntAnalyzer <> nil);
      if not Result then Exit;
@@ -2726,11 +2862,12 @@ var
      Result := Result or (N > 0);
      if not Result then Exit;
      // To prevent repeated opening
-     if FSubLexerBlocks.Count > 0 then
+     NCnt := FSubLexerBlocks.Count;
+     if NCnt > 0 then
      begin
-       sub := FSubLexerBlocks.Last;
-       if (sub.Range.EndPos = FPos - 1) and
-          (sub.Rule = Rule) then Exit;
+       SubPtr := FSubLexerBlocks.InternalGet(NCnt - 1);
+       if (SubPtr.Range.EndPos = FPos - 1) and
+          (SubPtr.Rule = Rule) then Exit;
      end;
 
      ApplyStates(Rule);
@@ -2767,6 +2904,8 @@ var
 begin
   Source := FBuffer.FText;
   GetOwner;
+  if own=nil then
+    raise EParserError.Create('GetOwner=nil');
   TryOpenSubLexer;
   if own.SkipSpaces then
     begin
@@ -2776,6 +2915,8 @@ begin
    else if FPos > Length(Source) then N := -1 else N := 0;
   TryOpenSubLexer;
   GetOwner;
+  if own=nil then
+    raise EParserError.Create('GetOwner=nil');
 
   Result := N = -1;
   if Result then Exit;
@@ -3260,10 +3401,12 @@ var
   bSeparateBlocks: boolean;
   bDisableFolding: boolean;
   NPos, NTemp, NTagCount, iToken: integer;
+{
 const
   ProgressMinPos = 2000;
   ProcessMsgStep1 = 1000; //stage1: finding tokens
   ProcessMsgStep2 = 1000; //stage2: finding ranges
+}
 begin
   Result := eprNormal;
   BufferVersion := Buffer.Version;
@@ -3453,6 +3596,7 @@ var
   //lexer will update ranges, which have ending at changed-pos minus delta (in tokens)
   NDeltaRanges: integer;
   NLine, NTokenIndex, i: integer;
+  Range: TecTextRange;
 begin
   if FPrevChangeLine < 0 then Exit;
   NLine := FPrevChangeLine;
@@ -3505,16 +3649,19 @@ begin
 
   // Remove text ranges from main storage
   for i := FRanges.Count - 1 downto 0 do
-    with TecTextRange(FRanges[i]) do
-      if (FCondIndex >= NTagCount) or (StartIdx >= NTagCount) then
-        FRanges.Delete(i)
-      else
-      if (FEndCondIndex >= NTagCount - NDeltaRanges) or (EndIdx >= NTagCount - NDeltaRanges) then // Alexey: delta
-      begin
-        EndIdx := -1;
-        FEndCondIndex := -1;
-        FOpenedBlocks.Add(FRanges[i]);
-      end;
+  begin
+    Range := TecTextRange(FRanges[i]);
+    if (Range.FCondIndex >= NTagCount) or (Range.StartIdx >= NTagCount) then
+      FRanges.Delete(i)
+    else
+    if (Range.FEndCondIndex >= NTagCount - NDeltaRanges) or
+       (Range.EndIdx >= NTagCount - NDeltaRanges) then // Alexey: delta
+    begin
+      Range.EndIdx := -1;
+      Range.FEndCondIndex := -1;
+      FOpenedBlocks.Add(Range);
+    end;
+  end;
 
   // Restore parser state
   RestoreState;
@@ -4961,16 +5108,6 @@ begin
   FNotes.Assign(Value);
 end;
 
-procedure TecSyntAnalyzer.SetInternal(const Value: boolean);
-begin
-  FInternal := Value;
-end;
-
-procedure TecSyntAnalyzer.SetRestartFromLineStart(const Value: Boolean);
-begin
-  FRestartFromLineStart := Value;
-end;
-
 procedure TecSyntAnalyzer.SetParseEndOfLine(const Value: Boolean);
 begin
   if FParseEndOfLine <> Value then
@@ -5010,12 +5147,8 @@ begin
   CompileGramma;
 end;
 
-procedure TecSyntAnalyzer.SetLineComment(const Value: ecString);
-begin
-  FLineComment := Value;
-end;
-
 function TecSyntAnalyzer.GetSeparateBlocks: Boolean;
+
   function HasStateModif(List: TCollection): Boolean;
   var i: integer;
   begin
@@ -5028,7 +5161,10 @@ function TecSyntAnalyzer.GetSeparateBlocks: Boolean;
           end;
     Result := False;
   end;
-var i: integer;
+
+var
+  SyntAn: TecSyntAnalyzer;
+  i: integer;
 begin
   if FSeparateBlocks = sbmUnknown then
     begin
@@ -5044,12 +5180,15 @@ begin
             end;
       if Result then
         for i := 0 to SubAnalyzers.Count - 1 do
-          if (SubAnalyzers[i].SyntAnalyzer <> nil) and
-             not SubAnalyzers[i].SyntAnalyzer.SeparateBlockAnalysis then
+        begin
+          SyntAn := SubAnalyzers[i].SyntAnalyzer;
+          if (SyntAn <> nil) and
+             not SyntAn.SeparateBlockAnalysis then
             begin
               Result := False;
               Break;
             end;
+        end;
       if Result then
         FSeparateBlocks := sbmEnabled
       else
@@ -5518,11 +5657,15 @@ end;
 
 function TLoadableComponent.ThemeMappingOfStyle(const AName: string): string;
 var
+  ItemPtr: ^TThemeMappingItem;
   i: integer;
 begin
   for i := 0 to ThemeMappingCount-1 do
-    if AName=ThemeMappingArray[i].StrFrom then
-      exit(ThemeMappingArray[i].StrTo);
+  begin
+    ItemPtr := @ThemeMappingArray[i];
+    if AName = ItemPtr^.StrFrom then
+      Exit(ItemPtr^.StrTo);
+  end;
   Result := '';
 end;
 
@@ -5565,8 +5708,9 @@ begin
 end;
 
 procedure TLoadableComponent.SetName(const NewName: TComponentName);
-var Base: string;
-    n:integer;
+var
+  Base: string;
+  n: integer;
 begin
   if not FSkipNewName then
    if CheckExistingName and (Owner.FindComponent(NewName) <> nil) then
@@ -5649,28 +5793,36 @@ end;
 
 procedure TecSubAnalyzerRule.SetEndExpression(const Value: ecString);
 begin
+  if FEndRegExpr.Expression = Value then Exit;
   FEndRegExpr.Expression := Value;
   Changed(False);
 end;
 
 procedure TecSubAnalyzerRule.SetStartExpression(const Value: ecString);
 begin
+  if FStartRegExpr.Expression = Value then Exit;
   FStartRegExpr.Expression := Value;
   Changed(False);
 end;
 
 procedure TecSubAnalyzerRule.SetSyntAnalyzer(const Value: TecSyntAnalyzer);
-var own: TecSyntAnalyzer;
+var
+  own: TecSyntAnalyzer;
 
-  function IsLinked(SAnal: TecSyntAnalyzer): Boolean;
-  var i: integer;
+  function IsLinked(AAnalyzer: TecSyntAnalyzer): Boolean;
+  var
+    CollectItem: TCollectionItem;
+    i: integer;
   begin
     for i := 0 to Collection.Count - 1 do
-     if (Collection.Items[i] <> Self) and ((Collection.Items[i] as TecSubAnalyzerRule).SyntAnalyzer = SAnal) then
+    begin
+      CollectItem := Collection.Items[i];
+      if (CollectItem <> Self) and ((CollectItem as TecSubAnalyzerRule).SyntAnalyzer = AAnalyzer) then
       begin
        Result := True;
        Exit;
       end;
+    end;
     Result := False;
   end;
 
@@ -5689,18 +5841,21 @@ end;
 
 procedure TecSubAnalyzerRule.SetFromTextBegin(const Value: Boolean);
 begin
+  if FFromTextBegin = Value then Exit;
   FFromTextBegin := Value;
   Changed(False);
 end;
 
 procedure TecSubAnalyzerRule.SetToTextEnd(const Value: Boolean);
 begin
+  if FToTextEnd = Value then Exit;
   FToTextEnd := Value;
   Changed(False);
 end;
 
 procedure TecSubAnalyzerRule.SetIncludeBounds(const Value: Boolean);
 begin
+  if FIncludeBounds = Value then Exit;
   FIncludeBounds := Value;
   Changed(False);
 end;

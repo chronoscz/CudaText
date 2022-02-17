@@ -1,6 +1,6 @@
 name: cudatext
 title: CudaText
-version: '1.148.5.0'
+version: '1.152.0.2'
 summary: Open source and cross-platform text editor.
 description: |
   CudaText is a cross-platform text editor, written in Object Pascal. It is open source project and can be used free of charge, even for business. It starts quite fast: ~0.3 sec with ~30 plugins, on Linux on CPU Intel Core i3 3GHz. It is extensible by Python add-ons: plugins, linters, code tree parsers, external tools. Syntax parser is feature-rich, from EControl engine.
@@ -69,7 +69,9 @@ parts:
       apt install ./lazarus-project_2.0.12-0_amd64.deb ./fpc-laz_3.2.0-1_amd64.deb ./fpc-src_3.2.0-1_amd64.deb
     prime: [-*]
   cudatext:
-    after: [lazarus]
+    after:
+    - lazarus
+    - desktop-gtk2
     plugin: nil
     source: .
     source-type: local
@@ -86,6 +88,9 @@ parts:
       cp -r app/data $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
       cp -r app/py $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
       cp -r app/settings_default $SNAPCRAFT_PART_INSTALL/usr/share/cudatext
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/themes
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/icons
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/sounds
     stage:
     - usr
     - usr/bin
@@ -94,10 +99,63 @@ parts:
     - usr/share/pixmaps
     stage-packages:
     - libgtk2.0-0
+    - python3
+
+  desktop-gtk2:
+    source: https://github.com/ubuntu/snapcraft-desktop-helpers.git
+    source-subdir: gtk
+    plugin: make
+    make-parameters: ["FLAVOR=gtk2"]
+    build-packages:
+    - build-essential
+    - libgtk2.0-dev
+    stage-packages:
+    - libxkbcommon0  # XKB_CONFIG_ROOT
+    - ttf-ubuntu-font-family
+    - dmz-cursor-theme
+    - light-themes
+    - adwaita-icon-theme
+    - gnome-themes-standard
+    - shared-mime-info
+    - libgtk2.0-0
+    - libgdk-pixbuf2.0-0
+    - libglib2.0-bin
+    - libgtk2.0-bin
+    - unity-gtk2-module
+    - locales-all
+    - libappindicator1
+    - xdg-user-dirs
+    - ibus-gtk
+    - libibus-1.0-5
+      
+# Additional plugs to pick up the GTK theme and icons from the system
+plugs: 
+  icon-themes:
+    interface: content
+    target: $SNAP/data-dir/icons
+    default-provider: gtk-common-themes
+  sound-themes:
+    interface: content
+    target: $SNAP/data-dir/sounds
+    default-provider: gtk-common-themes
+  gtk-2-engines:
+    interface: content
+    target: $SNAP/lib/gtk-2.0
+    default-provider: gtk2-common-themes:gtk-2-engines
+  gtk-2-themes:
+    interface: content
+    target: $SNAP/usr/share/themes
+    default-provider: gtk2-common-themes:gtk-2-themes
+
+environment:
+  XDG_DATA_DIRS: $SNAP/usr/share:$XDG_DATA_DIRS
+  GTK_PATH: $SNAP/lib/gtk-2.0
 
 apps:
   cudatext:
     command: usr/bin/cudatext
+    command-chain:
+    - bin/desktop-launch    
     desktop: usr/share/applications/CudaText.desktop
     plugs:
     - desktop

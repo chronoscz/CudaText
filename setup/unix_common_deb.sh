@@ -1,4 +1,5 @@
 #!/bin/sh
+set -x
 
 . ./cuda_ver.sh
 debsuffix=$1
@@ -9,7 +10,7 @@ mkdir -p $outdir
 debname=cudatext_$cuda_ver-1_$debsuffix
 
 dd=~/tmp/$debname
-sudo rm -rf $dd
+#sudo rm -rf $dd
 
 mkdir -p $dd
 mkdir $dd/DEBIAN

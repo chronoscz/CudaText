@@ -29,7 +29,7 @@ const
 
 type
   TATLinePart = packed record
-    Offset: SmallInt; //2 bytes
+    Offset: integer; //4 bytes, 2 bytes are not enough (app will crash on line length 120K, with wrap=off)
     Len: word; //2 bytes
     ColorFont, ColorBG, ColorBorder: TColor;
     FontStyles: byte;
@@ -61,6 +61,9 @@ procedure DoPartsCutFromOffset(var P: TATLineParts; AOffset: integer);
 
 function ColorBlend(c1, c2: Longint; A: Longint): Longint;
 function ColorBlendHalf(c1, c2: Longint): Longint;
+
+function ConvertFontStylesToInteger(Styles: TFontStyles): integer;
+function ConvertIntegerToFontStyles(Value: integer): TFontStyles;
 
 implementation
 
@@ -387,6 +390,29 @@ begin
           Offset:= 0;
         end;
       end;
+end;
+
+
+function ConvertFontStylesToInteger(Styles: TFontStyles): integer;
+begin
+  Result:= 0;
+  if fsBold in Styles then
+    Result:= Result or afsFontBold;
+  if fsItalic in Styles then
+    Result:= Result or afsFontItalic;
+  if fsStrikeOut in Styles then
+    Result:= Result or afsFontCrossed;
+end;
+
+function ConvertIntegerToFontStyles(Value: integer): TFontStyles;
+begin
+  Result:= [];
+  if (Value and afsFontBold)<>0 then
+    Include(Result, fsBold);
+  if (Value and afsFontItalic)<>0 then
+    Include(Result, fsItalic);
+  if (Value and afsFontCrossed)<>0 then
+    Include(Result, fsStrikeOut);
 end;
 
 
