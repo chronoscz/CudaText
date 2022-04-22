@@ -9,6 +9,7 @@ Copyright (c) Alexey Torgashin
 
 procedure TfmMain.DoLoadCommandLineBaseOptions(out AWindowPos: string;
   out AAllowSessionLoad, AAllowSessionSave: TAppAllowSomething;
+  out AStartupCommand: string;
   out AFileFolderCount: integer);
 // Function handles these options: -v -h -w -el -ns
 // Option -n is handled via var proc_globdata.AppAlwaysNewInstance
@@ -19,6 +20,7 @@ begin
   AWindowPos:= '';
   AAllowSessionLoad:= aalsEnable;
   AAllowSessionSave:= aalsEnable;
+  AStartupCommand:= '';
   AFileFolderCount:= 0;
 
   for i:= 1 to ParamCount do
@@ -47,6 +49,12 @@ begin
     if SBeginsWith(SParam, '-w=') then
     begin
       AWindowPos:= Copy(SParam, 4, MaxInt);
+      Continue;
+    end;
+
+    if SBeginsWith(SParam, '-c=') then
+    begin
+      AStartupCommand:= Copy(SParam, 4, MaxInt);
       Continue;
     end;
 
@@ -125,12 +133,14 @@ var
   NLine, NColumn, i: integer;
   bReadOnly: boolean;
   bAllowCreate: boolean;
+  bFirstFolder: boolean;
   sEncoding, sCli: string;
   SepCli: TATStringSeparator;
   List: TStringList;
 begin
   bReadOnly:= false;
   bAllowCreate:= true;
+  bFirstFolder:= true;
   sEncoding:= '';
 
   for i:= 0 to Length(AParams)-1 do
@@ -228,7 +238,8 @@ begin
     begin
       Application.ProcessMessages; //fix issue #3928
 
-      DoFolderOpen(SParam, False, cInvokeAppInternal);
+      DoFolderOpen(SParam, bFirstFolder, cInvokeAppInternal);
+      bFirstFolder:= false;
     end
     else
     if FileExists(SParam) then

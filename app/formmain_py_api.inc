@@ -26,11 +26,6 @@ begin
   Result:= AppPython.ObjectToPyInt(Obj);
 end;
 
-procedure MsgOldApi(const s: string);
-begin
-  MsgLogConsole(Format(msgApiDeprecated, [s]));
-end;
-
 function PyHelper_SendMessageFromString(const AText: string): integer;
 var
   H: Int64;
@@ -771,6 +766,10 @@ begin
       end;
 
       Ok:= fmMain.DoFileOpen(StrFile, StrFile2, Pages, StrArgs)<>nil;
+      if Ok then
+        if (StrFile<>'') or (StrFile2<>'') then
+          Application.ProcessMessages; //fixes https://github.com/kvichans/cuda_find_in_files4/issues/44
+
       Result:= PyBool_FromLong(Ord(Ok));
     end
     else
@@ -904,14 +903,28 @@ begin
             Ed.DoCaretSingle(X1, Y1, X2, Y2);
 
             if (NOptions and CARET_OPTION_NO_SCROLL)=0 then
+            begin
+              {
+              //tried to fix issue in FindInFiles 4, but it don't help
+              // https://github.com/kvichans/cuda_find_in_files4/issues/44
+              Ed.DoShowPos(
+                Point(X1, Y1),
+                UiOps.FindIndentHorz,
+                UiOps.FindIndentVert,
+                true, //AUnfold
+                true, //AllowUpdate
+                true //AllowProximity
+                );
+              }
               Ed.DoGotoPos(
                 Point(X1, Y1),
                 Point(X2, Y2),
                 UiOps.FindIndentHorz,
                 UiOps.FindIndentVert,
-                false,
-                true //(NOptions and CARET_OPTION_UNFOLD)<>0
+                false, //APlaceCaret
+                true //ADoUnfold
                 );
+            end;
 
             Result:= ReturnNone;
           end;
@@ -1937,7 +1950,7 @@ begin
         BOOKMARK_SETUP:
           begin
             AppBookmarkSetup[NKind].ImageIndex:=
-              UpdateImagelistWithIconFromFile(AppBookmarkImagelist, StrText);
+              UpdateImagelistWithIconFromFile(AppBookmarkImagelist, StrText, 'Editor.bookmark(...BOOKMARK_SETUP...)');
             AppBookmarkSetup[NKind].Color:= NColor;
             Result:= ReturnNone;
           end;
@@ -1983,26 +1996,26 @@ begin
 end;
 
 
-function PyHelper_DecorGetItem(Item: TATGutterDecorItem): PPyObject;
+function PyHelper_DecorGetItem(Item: PATGutterDecorItem): PPyObject;
 begin
   with AppPython.Engine do
     Result:= Py_BuildValue('{sisLsssOsOsisisO}',
       'line',
-      Item.Data.LineNum,
+      Item^.Data.LineNum,
       'tag',
-      Item.Data.Tag,
+      Item^.Data.Tag,
       'text',
-      PChar(string(Item.Data.Text)),
+      PChar(string(Item^.Data.Text)),
       'bold',
-      PyBool_FromLong(Ord(Item.Data.TextBold)),
+      PyBool_FromLong(Ord(Item^.Data.TextBold)),
       'italic',
-      PyBool_FromLong(Ord(Item.Data.TextItalic)),
+      PyBool_FromLong(Ord(Item^.Data.TextItalic)),
       'color',
-      Item.Data.TextColor,
+      Item^.Data.TextColor,
       'image',
-      Item.Data.ImageIndex,
+      Item^.Data.ImageIndex,
       'auto_del',
-      PyBool_FromLong(Ord(Item.Data.DeleteOnDelLine))
+      PyBool_FromLong(Ord(Item^.Data.DeleteOnDelLine))
       );
 end;
 
@@ -2033,7 +2046,7 @@ begin
                 raise EPythonError.Create(msgPythonListError);
               for i:= 0 to NCount-1 do
                 PyList_SetItem(Result, i,
-                  PyHelper_DecorGetItem(Ed.GutterDecor[i])
+                  PyHelper_DecorGetItem(Ed.GutterDecor.ItemPtr(i))
                   );
             end;
 
@@ -2041,7 +2054,7 @@ begin
           begin
             i:= Ed.GutterDecor.Find(NLine);
             if i>=0 then
-              Result:= PyHelper_DecorGetItem(Ed.GutterDecor[i])
+              Result:= PyHelper_DecorGetItem(Ed.GutterDecor.ItemPtr(i))
             else
               Result:= ReturnNone;
           end;
@@ -3025,6 +3038,7 @@ var
   Lex: TecSyntAnalyzer;
   Sep: TATStringSeparator;
   CharSize: TATEditorCharSize;
+  bValue: boolean;
 begin
   with AppPython.Engine do
     if Bool(PyArg_ParseTuple(Args, 'Lis:get_prop', @H, @Id, @Ptr)) then
@@ -3042,16 +3056,28 @@ begin
           Result:= PyBool_FromLong(Ord(Ed.OptGutterVisible));
 
         PROP_GUTTER_STATES:
-          Result:= PyBool_FromLong(Ord(Ed.Gutter[Ed.GutterBandStates].Visible));
+          begin
+            bValue:= Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagLineStates)].Visible;
+            Result:= PyBool_FromLong(Ord(bValue));
+          end;
 
         PROP_GUTTER_NUM:
-          Result:= PyBool_FromLong(Ord(Ed.Gutter[Ed.GutterBandNumbers].Visible));
+          begin
+            bValue:= Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers)].Visible;
+            Result:= PyBool_FromLong(Ord(bValue));
+          end;
 
         PROP_GUTTER_FOLD:
-          Result:= PyBool_FromLong(Ord(Ed.Gutter[Ed.GutterBandFolding].Visible));
+          begin
+            bValue:= Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding)].Visible;
+            Result:= PyBool_FromLong(Ord(bValue));
+          end;
 
         PROP_GUTTER_BM:
-          Result:= PyBool_FromLong(Ord(Ed.Gutter[Ed.GutterBandBookmarks].Visible));
+          begin
+            bValue:= Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks)].Visible;
+            Result:= PyBool_FromLong(Ord(bValue));
+          end;
 
         PROP_WRAP:
           Result:= PyLong_FromLong(Ord(Ed.OptWrapMode));
@@ -3767,16 +3793,16 @@ begin
           Ed.OptGutterVisible:= ValueBool;
 
         PROP_GUTTER_STATES:
-          Ed.Gutter[Ed.GutterBandStates].Visible:= ValueBool;
+          Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagLineStates)].Visible:= ValueBool;
 
         PROP_GUTTER_NUM:
-          Ed.Gutter[Ed.GutterBandNumbers].Visible:= ValueBool;
+          Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers)].Visible:= ValueBool;
 
         PROP_GUTTER_FOLD:
-          Ed.Gutter[Ed.GutterBandFolding].Visible:= ValueBool;
+          Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding)].Visible:= ValueBool;
 
         PROP_GUTTER_BM:
-          Ed.Gutter[Ed.GutterBandBookmarks].Visible:= ValueBool;
+          Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks)].Visible:= ValueBool;
 
         PROP_WRAP:
           Ed.OptWrapMode:= TATEditorWrapMode(ValueInt);
@@ -4578,6 +4604,7 @@ var
   StrCaption, StrId, StrFilename, StrCmd, StrIndex: string;
   SplitVert, SplitVisible, ok: boolean;
   SplitPos, SplitTotal: integer;
+  ClipExData: TATEditorClipboardExData;
   Params: TAppVariantArray;
   ParamBool: boolean;
   ParamRect: TRect;
@@ -4608,6 +4635,33 @@ begin
             Result:= ReturnNone;
           end;
 
+        APP_PROC_GET_CLIP_EX:
+          begin
+            ATEditorGetClipboardExData(ClipExData);
+            //we get more info than ATEditorGetClipboardExData gives,
+            //so always return Dict, even if clipboard is empty
+            Result:= Py_BuildValue('{sOsOsisisisssLsLsL}',
+              'is_column',
+              PyBool_FromLong(Ord(Clipboard.HasFormat(ATEditorOptions.ClipboardColumnFormat))),
+              'caret_pos',
+              PyHelper_Rect(ClipExData.CaretPos),
+              'caret_count',
+              ClipExData.CaretCount,
+              'indent_chars',
+              ClipExData.FirstLineIndentChars,
+              'indent_columns',
+              ClipExData.FirstLineIndentColumns,
+              'file_name',
+              PChar(string(ClipExData.FileName)),
+              'version',
+              ClipExData.ModifiedVersion,
+              'tick_on_copy',
+              ClipExData.TickOnCopy,
+              'tick_current',
+              GetTickCount64
+              );
+          end;
+
         APP_PROC_CLIP_ENUM:
           begin
             Result:= PyUnicodeFromString(DoClipboardFormatsAsString);
@@ -4627,19 +4681,35 @@ begin
             Result:= PyHelper_CommandList;
           end;
 
+        APP_PROC_GET_COMPILER_INFO:
+          begin
+            Result:= Py_BuildValue('{ssssssss}',
+              'os',
+              PChar(LowerCase({$I %FPCTARGETOS%})),
+              'cpu',
+              PChar({$I %FPCTARGETCPU%}),
+              'widgetset',
+              PChar(GetLCLWidgetTypeName),
+              'fpc',
+              PChar({$I %FPCVersion%})
+              );
+          end;
+
         APP_PROC_SAVE_SESSION:
           begin
-            SSplitByChar(Str, ';', Str1, Str2);
+            Sep.Init(Str, ';');
+            Sep.GetItemStr(StrFilename);
+            Sep.GetItemStr(StrCmd);
 
             //do session backups, when Auto Save plugin saves _default_ session
-            if IsDefaultSession(Str1) then
-              fmMain.DoOps_SaveSessionsBackups(Str1);
+            if IsDefaultSession(StrFilename) then
+              fmMain.DoOps_SaveSessionsBackups(StrFilename);
 
             ParamBool:= fmMain.DoOps_SaveSession(
-              Str1,
-              Pos('n', Str2)=0, //ASaveModifiedFiles
-              Pos('u', Str2)=0, //ASaveUntitlesTabs
-              Pos('t', Str2)>0 //AByTimer
+              StrFilename,
+              Pos('n', StrCmd)=0, //ASaveModifiedFiles
+              Pos('u', StrCmd)=0, //ASaveUntitlesTabs
+              Pos('t', StrCmd)>0 //AByTimer
               );
             Result:= PyBool_FromLong(Ord(ParamBool));
           end;
@@ -5536,7 +5606,13 @@ begin
             else
               AppLexersLastDetected:= TStringList.Create;
 
-            Lexer_DetectByFilename(StrValue, Lexer, LexerLite, SName, @fmMain.DoPyLexerDetection);
+            Lexer_DetectByFilename(
+              StrValue,
+              Lexer,
+              LexerLite,
+              SName,
+              ok,
+              @fmMain.DoPyLexerDetection);
 
             if AppLexersLastDetected.Count>0 then
               Result:= StringsToPyTuple(AppLexersLastDetected)
@@ -6751,7 +6827,7 @@ begin
 
         IMAGELIST_ADD:
           begin
-            NX:= UpdateImagelistWithIconFromFile(List, StrValue);
+            NX:= UpdateImagelistWithIconFromFile(List, StrValue, 'imagelist_proc(...IMAGELIST_ADD...)');
             if NX>=0 then
               Result:= PyLong_FromLong(NX)
             else

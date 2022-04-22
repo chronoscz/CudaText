@@ -31,6 +31,7 @@ Event handlers (Command.on_nnnnn methods) return-value is ignored is many cases,
 * on_save(self, ed_self): Called after saving file.
 * on_save_pre(self, ed_self): Called before saving file. Method can return False to disable saving, other value is ignored.
 * on_save_naming(self, ed_self): Called before saving untitled tab, to get suggested filename without path and extension. Method must return valid filename string or None.
+* on_delete_file(self, ed_self, filename): Called on running command "File / Close and delete file". ed_self is None.
 * on_start(self, ed_self): Called once on program start. ed_self is None.
 * on_exit(self, ed_self): Called on exiting application. This event is lazy, ie it's called only for already loaded plugins. ed_self is None.
 * on_app_activate(self, ed_self): Called when application window gets focus. ed_self is None.
@@ -242,7 +243,6 @@ Actions work with props of Find/Replace dialog, and props of low-level search en
 
 ====app_proc - System====
 
-* PROC_GET_OS_SUFFIX: Returns string of OS suffix, which is used in some CudaText option names. Possible values are listed in the default.json file.
 * PROC_ENUM_FONTS: Returns list of font names, currently installed in OS. Note: only some names are common in all OSes (like Arial, Courier, Courier New, Terminal, maybe more).
 * PROC_GET_SYSTEM_PPI: Returns int value of screen pixels-per-inch. Usual value is 96. When OS UI is scaled, it's bigger, e.g. for scale 150% it is round(96*1.5).
 * PROC_GET_GUI_HEIGHT: Returns height (pixels) of GUI element for dlg_custom(). Possible values of 'text': 'button', 'label', 'linklabel', 'combo', 'combo_ro', 'edit', 'spinedit', 'check', 'radio', 'checkbutton', 'filter_listbox', 'filter_listview'. Special value 'scrollbar' gets size of OS scrollbar. Returns None for other values.
@@ -250,9 +250,24 @@ Actions work with props of Find/Replace dialog, and props of low-level search en
 * PROC_SEND_MESSAGE: For Windows. Sends message to a window by its handle. Param "text" must be 4-tuple of int (window_handle, msg_code, param1, param2).
 * PROC_GET_UNIQUE_TAG: Gets integer value, which is unique for the current CudaText process (it starts with 100, increasing with each call). Use this value for Editor.markers() and Editor.attr() tag values.
 
+* PROC_GET_OS_SUFFIX: Returns string of OS suffix, which is used in some CudaText option names. Possible values are listed in the default.json file.
+* PROC_GET_COMPILER_INFO: Returns information about OS/CPU/WidgetSet CudaText was compiled for, as dict. Dict keys are: "os", "cpu", "widgetset", "fpc".
+
 ====app_proc - Clipboard====
 
 * PROC_GET_CLIP: Returns clipboard text.
+
+* PROC_GET_CLIP_EX: Returns additional info, stored to clipboard by CudaText, as dict. Dict keys are:
+** "is_column": bool: True if clipboard contains the column (vertical) block.
+** "caret_pos": 4-tuple of int: Position (x, y, x_end, y_end) of the first caret, at the moment of copying.
+** "caret_count": int: Number of caret(s), at the moment of copying.
+** "indent_chars": int: Number of indentation chars (spaces/tabs), of the block's first line, in the original document. Tab-chars are not expanded (counted as 1).
+** "indent_columns": int: Number of indentation columns, of the block's first line, in the original document. Tab-chars are expanded.
+** "file_name": str: Full path of the file from which text was copyied. Limited by 255 chars.
+** "version": int: Modification version of the document, at the moment of copying.
+** "tick_on_copy": int: OS tick-count in milliseconds, at the moment of copying.
+** "tick_current": int: OS tick-count in milliseconds, at the moment of this API call.
+
 * PROC_SET_CLIP: Copies text to clipboard (usual).
 * PROC_SET_CLIP_ALT: Copies text to alternate clipboard on Linux, called "primary selection".
 ** CudaText Copy commands put text to usual clipboard + primary selection.
@@ -263,6 +278,8 @@ Actions work with props of Find/Replace dialog, and props of low-level search en
 ** "t": Text format.
 ** "h": HTML format.
 ** "p": Picture format.
+** "c": CudaText format telling about "is it column (vertical) block".
+** "x": CudaText format telling about last copying to Clipboard (PROC_GET_CLIP_EX will show these details).
 
 * PROC_CLIP_SAVE_PIC: If Clipboard has a picture format, saves it to given filename (recommended the .png extension). Returns bool: clipboard has a picture, file is saved.
 
@@ -360,6 +377,8 @@ Session is a set of opened files + untitled tabs, with some properties of editor
 * PROC_LOAD_SESSION: Loads session from file with given name (closes all tabs first). Returns bool: tabs were closed without pressing Cancel, session was loaded.
 
 * PROC_SET_SESSION: Tells to app filename of session. Session with this filename will be saved on exit, loaded on start, shown in app title in {} brackets. Don't set here empty string. Default filename is "history session.json" without path. Missing path means that folder "settings" will be used.
+
+(Feature of API version 1.0.418.) Session-related actions support specifying the JSON path, into which session will be saved/loaded. If you want to use this feature, add the JSON path to the session filename, after pipe-char "|", e.g. "/some/path/sessionname.cuda-session|/my/key". Here "/my/key" specifies the JSON path of 2 levels ("key" inside "my").
 
 ====app_proc - Sidebar panels====
 
@@ -912,7 +931,7 @@ Action DLG_CTL_PROP_SET, for "listview", allows both "items" (it sets columns) a
 
 ====dlg_custom - Properties "ex"====
 
-Properties "ex0"..."ex9" are control-specific. They have different simple type (str, bool, int...).
+Properties "ex0"..."ex9" are specific to each control kind. They have different simple types (str, bool, int...). Note: for dlg_custom, bool values must be specified as "0"/"1", not as strings "True"/"False".
 
 * "button":
 ** "ex0": bool: default for Enter key
@@ -1039,7 +1058,7 @@ Additional types, supported only by "dlg_proc":
 * "p": int: Handle of parent form, or 0 if no parent.
 * "tag": str: Any string, set by plugin.
 
-* "border": int: Sets border of form, DBORDER_nnn constants. Don't specify it together with deprecated "resize".
+* "border": int: Border-style of form, one of DBORDER_nnn constants.
 ** DBORDER_NONE: No visible border, not resizable
 ** DBORDER_SIZE: Standard resizable border (on Windows: with Minimize/Maximize buttons)
 ** DBORDER_SINGLE: Single-line border, not resizable (on Windows: form has icon and Minimize button)
@@ -1050,12 +1069,11 @@ Additional types, supported only by "dlg_proc":
 * "topmost": bool: Makes form stay on top of other forms in CudaText.
 * "vis": bool: Visible state.
 * "color": int: Background color.
-* "autosize": bool: Form resizes to minimal size, which shows all visible controls. Don't use it together with "resize".
+* "autosize": bool: Form automatically resizes to the minimal size, which shows all visible controls.
 * "keypreview": bool: If on, then key press calls on_key_down before passing key to focused control. Should be True if form needs to handle on_key_down.
 * "p": int: Parent handle. Set this property to int handle of any windowed UI control or form, this control/form will be parent of form.
 * "focused" (only for reading): index of currently focused control.
 * "form_state" (only for reading): current form state, string: "norm" for normal, "min" for minimized, "max" for maximized, "fullscr" for full-screen.
-* (deprecated) "resize": bool: Border of form has "resizable" style.
 
 ====dlg_proc - Forms events====
 
@@ -1356,9 +1374,12 @@ Returns string if command selected, or None if cancelled.
  file_open(filename, group=-1, options="")
  file_open((filename1, filename2), group=-1, options="")
 
-Opens editor tab with given filename. If filename already opened, activates its tab. Pass empty string to open untitled tab.
+Opens editor tab with given filename. If filename already opened, activates its tab.
 
-First parameter can be 2-tuple (or 2-list) of string, to open two files in a single tab, in a splitted view. In this case, second filename won't be handled specially for zip file, picture file, binary file etc.
+First parameter can be 2-tuple / 2-list of string, to open 2 files in a single tab, in a splitted view. In this case, second filename won't be handled specially for zip file, picture file, binary file etc.
+
+The case of empty filename: opens empty untitled tab.
+The case of empty filename1 and non-empty filename2 is not supported: it also opens empty untitled tab, not splitted.
 
 Returns bool. True, if first filename is empty. Otherwise, returns True if first filename exists, and second filename is empty or exists.
 For zip file (only first filename is checked for it), returns True only if zip file contains valid CudaText add-on, and it was installed.
@@ -2618,21 +2639,27 @@ Notes:
 Controls decorations on gutter. It is used to show some visual marks, which look like bookmark icons, but independent of bookmarks. Possible values of "id":
 
 * DECOR_GET_ALL: Returns list of all decorations, as list of dict.
-* DECOR_GET: Returns decoration for single line, as dict. Params used: "line".
-* DECOR_SET: Sets decoration for single line, overwriting existing item for that line. Returns bool: line index correct, item added. Params used:
+* DECOR_GET: Returns decoration for given line, as dict. Params used: "line".
+* DECOR_SET: Sets decoration for given line. Returns bool: line index correct, item added. Params used:
 ** "line": int, line index.
 ** "tag": int, some value attached to item.
-** "text": str, text to show; decoration will be text.
+** "text": str, text to show.
+*** If "text" is not empty, decoration will be text.
+*** If "text" is empty, decoration depends on "image" value, see below.
 ** "color": int, color of text decoration.
 ** "bold": bool, use bold font for text decoration.
 ** "italic": bool, use italic font for text decoration.
-** "image": int, icon index from decoration imagelist; decoration will be icon, if text is empty.
+** "image": int, icon index from decoration imagelist.
+*** If "text" is empty and "image" is >=0, decoration will be icon.
+*** If "text" is empty and "image" is -1, decoratiton will be cell background filled with "color".
 ** "auto_del": bool, auto-delete decoration, when its line is deleted.
 
 * DECOR_DELETE_BY_LINE: Deletes single decoration for given line. Params used: "line".
 * DECOR_DELETE_BY_TAG: Deletes all decorations with the given tag. Param used: "tag".
 * DECOR_DELETE_ALL: Deletes all decorations.
 * DECOR_GET_IMAGELIST: Returns int handle of decoration imagelist (default size is 16x16).
+
+Note: decoration list allows 2 items for the same line number. One of items (it can be added first or last) must be "background filler" (ie empty "text" and "image" is -1), and another one must be "not background filler".
 
 ===Editor.folding===
 
@@ -2870,15 +2897,15 @@ Call "lock" increases counter, "unlock" decreases this counter (it's safe to cal
 
 Converts something in editor. Possible values of "id":
 
-* CONVERT_CHAR_TO_COL: Convert char coordinates (x,y) to column coordinates (column,y), using current tab size.
-* CONVERT_COL_TO_CHAR: Convert column coordinates (x,y) to char coordinates (chars,y).
-* CONVERT_LINE_TABS_TO_SPACES: Convert line (param "text") from tab-chars to spaces, using current tab size. Returns str. Returns original line, if no tab-chars in it.
-* CONVERT_SCREEN_TO_LOCAL: Convert pixel coordinates (x,y), from screen-related to control-related.
-* CONVERT_LOCAL_TO_SCREEN: Convert pixel coordinates (x,y), from control-related to screen-related.
-* CONVERT_PIXELS_TO_CARET: Convert pixel control-related coords (x,y) to text position (column,line).
-* CONVERT_CARET_TO_PIXELS: Convert text position (column,line) to pixel control-related coords (x,y).
-* CONVERT_OFFSET_TO_CARET: Convert absolute offset (0-based) given by param "x", to text position (column,line).
-* CONVERT_CARET_TO_OFFSET: Convert text position (column,line) to absolute offset.
+* CONVERT_CHAR_TO_COL: Convert char coordinates (x,y) to column coordinates (column,y), using current tabulation size. Param "text" is ignored. Returns 2-tuple of int.
+* CONVERT_COL_TO_CHAR: Convert column coordinates (x,y) to char coordinates (chars,y). Param "text" is ignored. Returns 2-tuple of int.
+* CONVERT_LINE_TABS_TO_SPACES: Convert line, given in param "text", from tabulation-chars to spaces, using current tabulation size. Returns string. Returns original line, if it does not contain tabulation-chars.
+* CONVERT_SCREEN_TO_LOCAL: Convert pixel coordinates (x,y), from screen-related to control-related. Param "text" is ignored. Returns 2-tuple of int.
+* CONVERT_LOCAL_TO_SCREEN: Convert pixel coordinates (x,y), from control-related to screen-related. Param "text" is ignored. Returns 2-tuple of int.
+* CONVERT_PIXELS_TO_CARET: Convert pixel control-related coords (x,y) to text position (column,line). Param "text" is ignored. Returns 2-tuple of int.
+* CONVERT_CARET_TO_PIXELS: Convert text position (x,y) to pixel control-related coords (x,y). Param "text" is ignored. Returns 2-tuple of int.
+* CONVERT_OFFSET_TO_CARET: Convert absolute offset (0-based) given by param "x", to text position (column,line). Params "y", "text" are ignored. Returns 2-tuple of int.
+* CONVERT_CARET_TO_OFFSET: Convert text position (x,y) to absolute text offset (0-based). Param "text" is ignored. Returns int.
 
 Returns None if params are incorrect, or cannot calculate the result.
 
@@ -3075,8 +3102,9 @@ Section "info":
 * key "subdir" must begin with "cuda_tree_"
 
 Section(s) "treehelper" followed by any string (e.g. "treehelper1"):
-* key "lexers" is comma-separated lexers list
+* key "lexers" is comma-separated lexers list (can contain lite lexer with suffix)
 * key "method" is name of getter method in __init__.py
+* key "fold" (value 0/1) is deprecated, not handled anymore
 
 File __init__.py must contain getter method(s), referenced by install.inf. Getter has signature (with any name):
 
@@ -3180,7 +3208,7 @@ Text is "\n"-separated undo/redo items. Each line is tab-separated elements:
 * index of changed line (not for mouse clicks), 0-based.
 * end-of-line kind, number 0..3:
 ** 0: none
-** 1: CRLF
+** 1: CR LF
 ** 2: LF
 ** 3: CR
 * line state, number 0..3:
@@ -3188,7 +3216,17 @@ Text is "\n"-separated undo/redo items. Each line is tab-separated elements:
 ** 1: changed
 ** 2: added
 ** 3: saved
-* caret position(s). "x0,y0;" + "x1,y1;" + "x2,y2;" + ... ie 2*N numbers for N carets.
+* caret position(s); carets are ";"-separated and x/y coords (32-bit) are ","-separated; for example "x0,y0;x1,y1;" for 2 carets;
+** plus chr(1) and marker position(s), 64-bit numbers ","-separated, where each marker is encoded as 7 numbers:
+*** position x,
+*** position y,
+*** selection-end x,
+*** selection-end y,
+*** tab-stop index,
+*** some value attached to marker,
+*** marker show mode, enum 0..2; 0: show in text only; 1: show in micromap only; 2: show in text and micromap.
+** plus chr(1) and global undo counter, 32-bit integer;
+** plus chr(1) and OS tick counter, 64-bit integer, in milliseconds (shows how much time is passed betweem items).
 * soft mark flag, number 0/1 (boolean). Logic of soft/hard marks is described in wiki page [[ATSynEdit]].
 * hard mark flag, number 0/1.
 * line text, in UTF8. This text can have tab-chars, tab-char is not separator.
@@ -4526,5 +4564,23 @@ Good example is "HTML Class Complete": https://github.com/CudaText-addons/cuda_h
 
 1.0.415 (app 1.153.1)
 * add: app_proc: PROC_SAVE_SESSION supports additional parameters
+
+1.0.416 (app 1.157.2)
+* add: app_proc: PROC_GET_CLIP_EX
+* add: app_proc: additional chars in result of PROC_CLIP_ENUM
+* deleted deprecated: "resize" property of forms in dlg_proc()
+
+1.0.417 (app 1.157.6)
+* add: app_proc: PROC_GET_COMPILER_INFO
+
+1.0.418 (app 1.158.3)
+* add: app_proc: session-related actions support specifying of JSON path for sessions
+
+1.0.419 (app 1.159.0)
+* add: event on_delete_file
+
+1.0.420 (app 1.159.3)
+* add: Editor.decor: allow to fill cell background, if "text" is empty and "image" is -1
+* add: Editor.decor: allow 2 decor items for the same line index
 
 [[Category:CudaText]]

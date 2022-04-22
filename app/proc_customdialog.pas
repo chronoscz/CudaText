@@ -27,7 +27,7 @@ uses
   ATGauge,
   ATStatusBar,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Edits,
   ATSynEdit_Adapter_EControl,
   proc_customdialog_dummy,
@@ -703,7 +703,7 @@ begin
   Ed.OnClickLink:= @AForm.DoOnEditorClickLink;
   Ed.OnScroll:= @AForm.DoOnEditorScroll;
   Ed.OnPaste:= @AForm.DoOnEditorPaste;
-  Ed.OnCommand:= CustomDialog_OnEditorCommand;
+  Ed.OnCommand:= AppCustomDialog_OnEditorCommand;
 
   Ed.OptBorderFocusedActive:= EditorOps.OpActiveBorderInEditor;
   Ed.OptBorderWidthFocused:= ATEditorScale(EditorOps.OpActiveBorderWidth);
@@ -1398,24 +1398,6 @@ begin
   end;
 end;
 
-
-{
-//deprecated api, to delete
-procedure DoControl_SetPropsFromString_Adv(C: TControl; const AValue: string);
-var
-  Sep: TATStringSeparator;
-  SItem: string;
-  NIndex: integer;
-begin
-  Sep.Init(AValue);
-  NIndex:= 0;
-  repeat
-    if not Sep.GetItemStr(SItem) then Break;
-    DoControl_SetEx(C, SItem, NIndex);
-    Inc(NIndex);
-  until false;
-end;
-}
 
 procedure DoControl_SetColumnsFromString(C: TControl; const S: string);
 begin
@@ -2349,14 +2331,6 @@ begin
   if AName='tag' then
     F.TagString:= AValue
   else
-  if AName='resize' then //deprecated!
-  begin
-    if AppStrToBool(AValue) then
-      F.BorderStyle:= bsSizeable
-    else
-      F.BorderStyle:= bsDialog;
-  end
-  else
   if AName='border' then
     F.BorderStyle:= TFormBorderStyle(StrToIntDef(AValue, Ord(bsDialog)))
   else
@@ -2618,4 +2592,3 @@ begin
 end;
 
 end.
-

@@ -305,6 +305,7 @@ PROC_GET_OS_SUFFIX       = 2
 PROC_SAVE_SESSION        = 3
 PROC_LOAD_SESSION        = 4
 PROC_SET_SESSION         = 5
+PROC_GET_CLIP_EX         = 6
 PROC_SET_FOLDER          = 7
 PROC_GET_COMMANDS        = 8
 PROC_SET_EVENTS          = 10
@@ -410,6 +411,7 @@ PROC_SET_PROJECT      = 158
 PROC_GET_UNIQUE_TAG   = 159
 PROC_ENUM_FONTS       = 160
 PROC_SEND_MESSAGE     = 161
+PROC_GET_COMPILER_INFO = 162
 
 PROC_CONFIG_READ           = 169
 PROC_CONFIG_NEWDOC_EOL_GET = 170
@@ -1079,6 +1081,12 @@ def dlg_custom(title, size_x, size_y, text, focused=-1, get_dict=False):
 
 def file_open(name, group=-1, options=''):
     if isinstance(name, (list, tuple)):
+        if len(name)<2:
+            raise ValueError('Length of "name" param must be >=2')
+        if type(name[0]) is not str:
+            raise ValueError('Param name[0] must be str')
+        if type(name[1]) is not str:
+            raise ValueError('Param name[1] must be str')
         return ct.file_open(name[0], name[1], group, options)
     else:
         return ct.file_open(name, '', group, options)

@@ -15,6 +15,7 @@ uses
   Classes, SysUtils, Forms, Controls, Graphics,
   ButtonPanel, ExtCtrls, Menus, IniFiles,
   LCLProc, LCLType,
+  ATSynEdit,
   proc_globdata,
   proc_customdialog,
   proc_msg;
@@ -27,6 +28,8 @@ type
     PanelPress: TPanel;
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormShow(Sender: TObject);
+    procedure PanelPressMouseDown(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
   private
     { private declarations }
     procedure Localize;
@@ -105,6 +108,12 @@ begin
   Localize;
   DoForm_ScaleAuto(Self);
   UpdateFormOnTop(Self);
+end;
+
+procedure TfmKeyInput.PanelPressMouseDown(Sender: TObject;
+  Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  if HandleMouseDownToHandleExtraMouseButtons(Self, Button, Shift) then exit;
 end;
 
 end.

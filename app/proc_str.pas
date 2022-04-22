@@ -26,7 +26,7 @@ function SFindFuzzyPositions(SText, SFind: UnicodeString): TATIntArray;
 procedure SDeleteDuplicateSpaces(var S: string);
 function SDeleteCurlyBrackets(const S: string): string;
 function STextListsAllWords(SText, SWords: string): boolean;
-function STextListsFuzzyInput(const SText, SFind: string): boolean;
+function STextListsFuzzyInput(const AText, AFind: string; out ASimpleMatch: boolean): boolean;
 function SRegexReplaceSubstring(const AStr, AStrFind, AStrReplace: string; AUseSubstitute: boolean): string;
 function SRegexMatchesString(const ASubject, ARegex: string; ACaseSensitive: boolean): boolean;
 
@@ -90,13 +90,25 @@ begin
   SText:= UnicodeLowerCase(SText);
   SFind:= UnicodeLowerCase(SFind);
 
+  //if simple match is found, don't calculate complex fuzzy matches
+  N:= Pos(SFind, SText);
+  if N>0 then
+  begin
+    SetLength(Result, Length(SFind));
+    Result[0]:= N;
+    for i:= 1 to High(Result) do
+      Result[i]:= Result[i-1]+1;
+    exit;
+  end;
+
+  //calculate complex matches
   N:= 0;
+  SetLength(Result, Length(SFind));
   for i:= 1 to Length(SFind) do
   begin
     N:= PosEx(SFind[i], SText, N+1);
     if N=0 then Exit(nil);
-    SetLength(Result, Length(Result)+1);
-    Result[High(Result)]:= N;
+    Result[i-1]:= N;
   end;
 end;
 
@@ -207,13 +219,17 @@ begin
   Result:= Pos(','+Ext+',', ','+AExtList+',' )>0;
 end;
 
-function STextListsFuzzyInput(const SText, SFind: string): boolean;
+function STextListsFuzzyInput(const AText, AFind: string; out ASimpleMatch: boolean): boolean;
 var
   Ar: TATIntArray;
 begin
+  ASimpleMatch:= Pos(UpperCase(AFind), UpperCase(AText))>0;
+  if ASimpleMatch then
+    exit(true);
+
   Ar:= SFindFuzzyPositions(
-    UTF8Decode(SText),
-    UTF8Decode(SFind)
+    UTF8Decode(AText),
+    UTF8Decode(AFind)
     );
   Result:= Length(Ar)>0;
 end;

@@ -153,7 +153,6 @@ begin
     DoLocMenuitem(mnuEditCut, ATEditorOptions.TextMenuitemCut);
     DoLocMenuitem(mnuEditCopy, ATEditorOptions.TextMenuitemCopy);
     DoLocMenuitem(mnuEditPaste, ATEditorOptions.TextMenuitemPaste);
-    DoLocMenuitem(mnuEditDel, ATEditorOptions.TextMenuitemDelete);
 
     DoLocMenuitem(ini, mnuEdit, 'm_e', '_');
     DoLocMenuitem(ini, mnuEditUndo, 'm_e', 'undo');
@@ -161,7 +160,8 @@ begin
     DoLocMenuitem(ini, mnuEditCut, 'm_e', 'cut');
     DoLocMenuitem(ini, mnuEditCopy, 'm_e', 'cp');
     DoLocMenuitem(ini, mnuEditPaste, 'm_e', 'pst');
-    DoLocMenuitem(ini, mnuEditDel, 'm_e', 'del');
+    DoLocMenuitem(ini, mnuEditPasteIndent, 'm_e', 'pst_in');
+    DoLocMenuitem(ini, mnuEditPasteHist, 'm_e', 'pst_hs');
 
     msgCopySub:= ini.ReadString('m_e', 'cp_', msgCopySub);
     msgCopyFilenameName:= ini.ReadString('m_e', 'cp_name', msgCopyFilenameName);
@@ -582,6 +582,8 @@ begin
     DoLocString(msgStatusFilenameAlreadyOpened   , ini, 'si', 'FilenameAlreadyOpened');
     DoLocString(msgStatusNeedToCloseTabSavedOrDup, ini, 'si', 'NeedToCloseTabSavedOrDup');
     DoLocString(msgStatusHotkeyBusy              , ini, 'si', 'HotkeyBusy');
+    DoLocString(msgStatusFontSizeChanged         , ini, 'si', 'FontSizeChanged');
+    DoLocString(msgStatusLexerDisabledBySize     , ini, 'si', 'LexerDisabledBySize');
     DoLocString(msgGotoDialogInfoExt             , ini, 'si', 'GotoInfoExt');
 
     DoLocString(msgConfirmSyntaxThemeSameName    , ini, 'sc', 'ThemeSyntaxSame');

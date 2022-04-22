@@ -185,6 +185,7 @@ cCommand_ClipboardPaste_Select = 1001
 cCommand_ClipboardPaste_KeepCaret = 1002
 cCommand_ClipboardPaste_Column = 1003 | _CmdFlag_SelReset
 cCommand_ClipboardPaste_ColumnKeepCaret = 1004 | _CmdFlag_SelReset
+cCommand_ClipboardPasteAndIndent = 1005
 cCommand_ClipboardCopy = 1006
 cCommand_ClipboardCopyAdd = 1007
 cCommand_ClipboardCut = 1008
@@ -197,6 +198,8 @@ cCommand_ClipboardAltPaste_Column = 1013 or _CmdFlag_SelReset
 cCommand_ClipboardAltPaste_ColumnKeepCaret = 1014 or _CmdFlag_SelReset
 #these use "Secondary selection" (alternative clipboard on gtk2)
 cCommand_ClipboardAltAltPaste = 1015
+cCommand_ClipboardPasteFromRecents = 1016
+cCommand_ClipboardClearRecents = 1017
 
 cCommand_TextCaseLower = 1020
 cCommand_TextCaseUpper = 1021
@@ -266,6 +269,7 @@ cmd_FileCloseAll       = 2513
 cmd_FileCloseAndDelete = 2514
 cmd_FileExportHtml     = 2515
 cmd_RepaintEditor      = 2516
+cmd_FileReopenRecent   = 2517
 
 cmd_OpsOpenDefaultAndUser = 2519
 cmd_OpsClearRecent     = 2520
@@ -406,9 +410,8 @@ cmd_CopyFilenameFull = 2651
 cmd_CopyFilenameDir  = 2652
 cmd_CopyFilenameName = 2653
 
-cmd_SortAsc          = 2654 #deleted
-cmd_SortDesc         = 2655 #deleted
-
+cmd_TabUsesSpaces_On    = 2655
+cmd_TabUsesSpaces_Off   = 2656
 cmd_ToggleTabUsesSpaces = 2657
 cmd_ConvertTabsToSpaces = 2658
 cmd_ConvertSpacesToTabsLeading = 2659
@@ -433,9 +436,14 @@ cmd_LineEndWin        = 2677
 cmd_LineEndUnix       = 2678
 cmd_LineEndMac        = 2679
 
-cmd_DeleteNewColorAttrs    = 2683
+cmd_LineEndWin_Caret     = 2680
+cmd_LineEndUnix_Caret    = 2681
+cmd_LineEndMac_Caret     = 2682
+cmd_LineEndDefault_Caret = 2683
+
 cmd_FoldingEnable          = 2684
 cmd_FoldingDisable         = 2685
+cmd_DeleteNewColorAttrs    = 2686
 
 cmd_MenuEnc           = 2691
 cmd_MenuEnds          = 2692
@@ -528,8 +536,6 @@ cmd_LinkAtPopup_Open           = 2808
 cmd_LinkAtPopup_Copy           = 2809
 
 cmd_MacroStart                 = 2810
-cmd_MacroStop                  = 2811 # deprecated 2021.10
-cmd_MacroCancel                = 2812 # deprecated 2021.10
 
 cmd_TreeGotoNext               = 2815
 cmd_TreeGotoPrev               = 2816
@@ -549,6 +555,10 @@ cmd_BracketHighlightToggle     = 2842
 cmd_BracketJump                = 2845
 cmd_BracketSelect              = 2846
 cmd_BracketSelectInside        = 2847
+
+cmd_TabSize_Set2               = 2862
+cmd_TabSize_Set4               = 2864
+cmd_TabSize_Set8               = 2868
 
 cmd_GroupActivate1             = 2901
 cmd_GroupActivate2             = 2902

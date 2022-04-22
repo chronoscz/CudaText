@@ -79,7 +79,9 @@ function TfmMain.DoPyEvent(AEd: TATSynEdit; AEvent: TAppPyEvent;
 const
   cTheseEventsStoppedByTrue = [cEventOnComplete, cEventOnFuncHint{, cEventOnTabSwitch}];
   cTheseEventsNeedGroupingUndo = [cEventOnComplete, cEventOnSnippet];
-  cTheseEventsDontRequireFrame = [cEventOnSnippet];
+  cTheseEventsDontRequireFrame = [cEventOnSnippet, cEventOnDeleteFile];
+  cTheseEventsAlwaysLazy = [cEventOnExit];
+  cTheseEventsIgnoreCurrentLexer = [cEventOnLexer, cEventOnStart, cEventOnExit, cEventOnDeleteFile];
 var
   SCurLexer, KeyForFilter: string;
   bNeedGroup: boolean;
@@ -105,7 +107,7 @@ begin
   Frame:= nil;
   SCurLexer:= '';
   bNeedGroup:= false;
-  bCheckLexer:= Assigned(AEd) and (AEvent<>cEventOnLexer);
+  bCheckLexer:= Assigned(AEd) and not (AEvent in cTheseEventsIgnoreCurrentLexer);
 
   if bCheckLexer then
   begin
@@ -164,7 +166,7 @@ begin
           AEd.Strings.BeginUndoGroup;
 
         try
-          bLazy:= (AEvent=cEventOnExit) or Plugin.ItemEventsLazy[AEvent]; //on_exit must be lazy
+          bLazy:= (AEvent in cTheseEventsAlwaysLazy) or Plugin.ItemEventsLazy[AEvent]; //on_exit must be lazy
           Result:= AppPython.RunEvent(
               Plugin.ItemModule,
               cAppPyEvent[AEvent],
@@ -413,7 +415,7 @@ begin
   fn:= AppDir_Py+DirectorySeparator+'cudatext_reset_plugins.py';
   if not FileExists(fn) then
   begin
-    MsgBox(msgCannotFindFile+#10+fn, MB_OK or MB_ICONERROR);
+    MsgBox(msgCannotFindFile+#10+AppCollapseHomeDirInFilename(fn), MB_OK or MB_ICONERROR);
     Exit
   end;
 
@@ -480,4 +482,12 @@ begin
     );
 end;
 
+procedure TfmMain.DoPyCommand_CommandLineParam(const AModuleAndMethod: string);
+var
+  SModule, SMethod: string;
+begin
+  SSplitByChar(AModuleAndMethod, ',', SModule, SMethod);
+  if (SModule<>'') and (SMethod<>'') then
+    DoPyCommand(SModule, SMethod, [], cInvokeAppInternal);
+end;
 

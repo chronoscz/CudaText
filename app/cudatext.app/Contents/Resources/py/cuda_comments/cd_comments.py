@@ -3,7 +3,7 @@ Authors:
     Andrey Kvichansky (kvichans on github.com)
     Alexey Torgashin (CudaText)
 Version:
-    '0.9.1 2021-12-18'
+    '1.0.0 2022-04-21'
 '''
 
 import  os
@@ -77,21 +77,72 @@ class Command:
        #def dlg_config
 
     def cmt_toggle_line_1st(self):
-        return self._cmt_toggle_line('bgn', '1st')
+        return self.work('bgn', '1st')
 
     def cmt_add_line_1st(self):
-        return self._cmt_toggle_line('add', '1st')
+        return self.work('add', '1st')
 
     def cmt_toggle_line_body(self):
-        return self._cmt_toggle_line('bgn', 'bod')
+        return self.work('bgn', 'bod')
 
     def cmt_add_line_body(self):
-        return self._cmt_toggle_line('add', 'bod')
+        return self.work('add', 'bod')
 
     def cmt_del_line(self):
-        return self._cmt_toggle_line('del')
+        return self.work('del')
 
-    def _cmt_toggle_line(self, cmt_act, cmt_type='', ed_=ed):
+    def line_cmt_by_range_cmt(self, ed_, rng1, rng2, cmt_act, cmt_type):
+        changed = 0
+        carets = ed_.get_carets()
+        for caret in reversed(carets):
+            x, y, x1, y1 = caret
+            if y1<0:
+                indexes = [y]
+            else:
+                if (y, x)>(y1, x1):
+                    x, y, x1, y1 = x1, y1, x, y
+                if x1==0:
+                    y1-=1
+                indexes = range(y, y1+1)
+
+            for index in indexes:
+                line = ed_.get_text_line(index)
+                line_x = line.lstrip()
+                if not line_x:
+                    continue
+                indent = line[:len(line)-len(line_x)]
+                commented1 = line.startswith(rng1) and line.endswith(rng2)
+                commented2 = line_x.startswith(rng1) and line_x.endswith(rng2)
+                if commented1 or commented2:
+                    if cmt_act=='add':
+                        continue
+                    if commented1:
+                        line_new = line[len(rng1): -len(rng2)]
+                    elif commented2:
+                        line_new = indent + line_x[len(rng1): -len(rng2)]
+                else:
+                    if cmt_act=='del':
+                        continue
+                    if cmt_type=='1st':
+                        line_new = rng1+line+rng2
+                    elif cmt_type=='bod':
+                        line_new = indent+rng1+line_x+rng2
+                    else:
+                        continue
+                ed_.set_text_line(index, line_new)
+                changed += 1
+
+        if changed:
+            app.msg_status(_('Toggled commenting for %d line(s)')%changed)
+            if len(carets)==1:
+                x, y, x1, y1 = carets[0]
+                if y1<0:
+                    if apx.get_opt('comment_move_down', True):
+                        apx._move_caret_down(x, y)
+        else:
+            app.msg_status(_('No commenting action was done'))
+
+    def work(self, cmt_act, cmt_type='', ed_=ed):
         ''' Add/Remove line-comments
             Params
                 cmt_act     'del' - uncomment all lines
@@ -100,17 +151,23 @@ class Command:
                 cmt_type    '1st' - at begin of line
                             'bod' - at first non-blank char
         '''
-#       if not apx._check_API('1.0.108'):    return
-        lex         = ed_.get_prop(app.PROP_LEXER_CARET)
+        lex = ed_.get_prop(app.PROP_LEXER_CARET)
         if not lex:
             return app.msg_status(_('Commenting requires an active lexer'))
-        prop        = app.lexer_proc(app.LEXER_GET_PROP, lex)
+        prop = app.lexer_proc(app.LEXER_GET_PROP, lex)
         if not prop:
             return
-        cmt_sgn     = prop['c_line']
-        pass;                  #log('cmt_type, lex, cmt_sgn={}', (cmt_type, lex, cmt_sgn))
+        cmt_sgn   = prop['c_line']
+        cmt_range = prop['c_str']
+        pass; #log('cmt_type, lex, cmt_sgn={}', (cmt_type, lex, cmt_sgn))
+
         if not cmt_sgn:
+            if cmt_range:
+                self.line_cmt_by_range_cmt(ed_, cmt_range[0], cmt_range[1], cmt_act, cmt_type)
+                return
+
             return app.msg_status(f(_('Lexer "{}" doesn\'t support "line comments"'), lex))
+
         # Analyze
         empty_sel   = False
         rWrks       = []
@@ -262,7 +319,7 @@ class Command:
                 dx = -dx
             cCrt = max(0, cCrt+dx)
             ed_.set_caret(cCrt, rCrt)
-       #def _cmt_toggle_line
+       #def work
 
     def cmt_toggle_stream(self):
         ''' '''

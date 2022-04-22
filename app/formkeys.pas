@@ -15,6 +15,7 @@ uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ButtonPanel,
   StdCtrls, Menus, ExtCtrls, IniFiles,
   LclType, LclProc, LazUTF8, LazFileUtils,
+  ATSynEdit,
   ATSynEdit_Keymap,
   proc_globdata,
   proc_customdialog,
@@ -50,6 +51,8 @@ type
     procedure FormShow(Sender: TObject);
     procedure HelpButtonClick(Sender: TObject);
     procedure OKButtonClick(Sender: TObject);
+    procedure panelPressMouseDown(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
     procedure TimerAddTimer(Sender: TObject);
   private
     { private declarations }
@@ -170,6 +173,12 @@ begin
   finally
     Item.Free;
   end;
+end;
+
+procedure TfmKeys.panelPressMouseDown(Sender: TObject; Button: TMouseButton;
+  Shift: TShiftState; X, Y: Integer);
+begin
+  if HandleMouseDownToHandleExtraMouseButtons(Self, Button, Shift) then exit;
 end;
 
 procedure TfmKeys.TimerAddTimer(Sender: TObject);

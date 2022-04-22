@@ -4,6 +4,8 @@ import collections
 import json
 import stat
 import copy
+import string
+import time
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from .projman_glob import *
@@ -16,10 +18,18 @@ _   = get_translation(__file__)  # i18n
 
 IS_WIN = os.name == 'nt'
 PROJECT_EXTENSION = ".cuda-proj"
-PROJECT_DIALOG_FILTER = _("CudaText projects|*") + PROJECT_EXTENSION
+PROJECT_DIALOG_FILTER = _("CudaText projects") + "|*" + PROJECT_EXTENSION
 PROJECT_UNSAVED_NAME = _("(Unsaved project)")
+PROJECT_TEMP_FILENAME = os.path.join(app_path(APP_DIR_SETTINGS), 'temporary'+PROJECT_EXTENSION)
 NODE_PROJECT, NODE_DIR, NODE_FILE, NODE_BAD = range(4)
 global_project_info = {}
+
+def is_session_name(s):
+    allowed = string.ascii_letters+string.digits+'., ()-+_$%='
+    for ch in s:
+        if not ch in allowed:
+            return False
+    return True
 
 def _file_open(fn, options=''):
     gr = ed.get_prop(PROP_INDEX_GROUP)
@@ -182,7 +192,7 @@ class Command:
         ("-"                       , "", [None, NODE_PROJECT, NODE_DIR, NODE_FILE, NODE_BAD], ""),
         (_("Go to file...")        , "", [None, NODE_PROJECT, NODE_DIR, NODE_FILE, NODE_BAD], "cuda_project_man.action_go_to_file"),
         (_("Project properties..."), "", [None, NODE_PROJECT, NODE_DIR, NODE_FILE, NODE_BAD], "cuda_project_man.action_project_properties"),
-        (_("Configure Project Manager..."), "", [None, NODE_PROJECT, NODE_DIR, NODE_FILE, NODE_BAD], "cuda_project_man.action_config"),
+        (_("Project Manager options..."), "", [None, NODE_PROJECT, NODE_DIR, NODE_FILE, NODE_BAD], "cuda_project_man.action_config"),
     )
 
     options = {
@@ -207,7 +217,7 @@ class Command:
             with self.options_filename.open(encoding='utf8') as fin:
                 self.options = json.load(fin)
 
-        self.new_project()
+        self.new_project(False, False) # don't forget session in on_start
 
 
     def init_form_main(self):
@@ -251,7 +261,8 @@ class Command:
         _toolbar_add_btn(self.h_bar, hint=_('Add file'), icon=icon_add_file, command='cuda_project_man.action_add_file' )
         _toolbar_add_btn(self.h_bar, hint=_('Remove node'), icon=icon_del, command='cuda_project_man.action_remove_node' )
         _toolbar_add_btn(self.h_bar, hint='-' )
-        _toolbar_add_btn(self.h_bar, hint=_('Configure'), icon=icon_cfg, command='cuda_project_man.menu_cfg')
+        _toolbar_add_btn(self.h_bar, hint=_('Sessions / Configure'), icon=icon_cfg, command='cuda_project_man.menu_cfg')
+        toolbar_proc(self.h_bar, TOOLBAR_SET_WRAP, index=True)
         toolbar_proc(self.h_bar, TOOLBAR_UPDATE)
 
         n = dlg_proc(self.h_dlg, DLG_CTL_ADD, prop='treeview')
@@ -387,8 +398,15 @@ class Command:
 
     def add_node(self, path):
         if path:
+            # on adding _first_ node to _untitled_ proj, name the proj as 'temporary' and save it
+            if not self.project["nodes"] and not self.project_file_path:
+                self.action_save_project_as(PROJECT_TEMP_FILENAME)
+                self.add_recent(PROJECT_TEMP_FILENAME)
+                self.save_options()
+
             if path in self.project["nodes"]:
                 return
+
             msg_status(_("Adding to project: ") + collapse_filename(path), True)
             self.project["nodes"].append(path)
             self.project["nodes"].sort(key=Command.node_ordering)
@@ -396,13 +414,23 @@ class Command:
             if self.project_file_path:
                 self.action_save_project_as(self.project_file_path)
 
-    def new_project(self):
+    def new_project(self, forget_session=True, apply_on_start=True):
+        if forget_session:
+            self.session_forget()
+
         self.project = dict(nodes=[])
         self.project_file_path = None
         self.update_global_data()
         self.goto_history = []
+
         app_proc(PROC_SET_FOLDER, '')
         app_proc(PROC_SET_PROJECT, '')
+
+        self.close_foreign_tabs(True)
+
+        if apply_on_start:
+            self.options['on_start'] = False
+            self.save_events()
 
     def add_recent(self, path):
         recent = self.options["recent_projects"]
@@ -568,13 +596,37 @@ class Command:
 
     def action_refresh(self, parent=None):
 
+        sel_fn = ''
+        id = self.selected
+        if id:
+            prop = tree_proc(self.tree, TREE_ITEM_GET_PROPS, id)
+            if prop:
+                sel_fn = prop.get('data', '')
+
         # it was hard to add TREE_LOCK/UNLOCK directly into action_refresh_int
         tree_proc(self.tree, TREE_LOCK)
         try:
+            unfolds = []
+            self.enum_all_getfolds(unfolds)
+            #msg_box('unfolds:\n'+', '.join(unfolds), MB_OK)
+
             self.action_refresh_int(parent)
+
+            self.enum_all_setfolds(unfolds)
         finally:
             tree_proc(self.tree, TREE_UNLOCK)
 
+        if sel_fn:
+            #print('sel to:', sel_fn)
+            self.enum_all_sel(sel_fn)
+
+
+    def get_project_name(self):
+
+        if self.project_file_path is None:
+            return PROJECT_UNSAVED_NAME
+        else:
+            return self.project_file_path.stem
 
     def action_refresh_int(self, parent=None):
 
@@ -582,11 +634,7 @@ class Command:
         if parent is None:
             # clear tree
             tree_proc(self.tree, TREE_ITEM_DELETE, 0)
-
-            if self.project_file_path is None:
-                project_name = PROJECT_UNSAVED_NAME
-            else:
-                project_name = self.project_file_path.stem
+            project_name = self.get_project_name()
 
             parent = tree_proc(
                 self.tree,
@@ -693,11 +741,18 @@ class Command:
                     if 'nodes' in self.project:
                         for i in range(len(self.project['nodes'])):
                             self.project['nodes'][i] = expand_macros(self.project['nodes'][i])
-                    #print('Loaded project:', self.project)
 
+                        # delete orphan items
+                        bads = [fn for fn in self.project["nodes"] if not os.path.exists(fn)]
+                        for fn in bads:
+                            self.project["nodes"].remove(fn)
+
+                    #print('Loaded project:', self.project)
                     self.project_file_path = Path(path)
                     self.add_recent(path)
                     self.action_refresh()
+                    self.options['on_start'] = True
+                    self.save_events()
                     self.save_options()
 
                 self.update_global_data()
@@ -709,9 +764,17 @@ class Command:
                         break
 
                 app_proc(PROC_SET_PROJECT, path)
-                msg_status(_("Project opened: ") + path)
+
+                s = _("Opened project: ") + os.path.basename(path)
+                if bads:
+                    s += ', ' + _('%d deleted item(s)')%len(bads)
+                msg_status(s)
+
+                sess = self.project.get('def_session', '')
+                if sess not in ('', '-'):
+                    self.session_load(sess, False)
             else:
-                msg_status(_("Project filename is not found: ") + path)
+                msg_status(_("Project file not found: ") + path)
 
     def action_add_folder(self):
         fn = dlg_dir("")
@@ -743,10 +806,16 @@ class Command:
             self.action_save_project_as(self.project_file_path)
 
     def action_clear_project(self):
+
+        self.session_forget()
+        self.session_delete_all()
         self.project["nodes"].clear()
+        if self.project_file_path:
+            self.action_save_project_as(self.project_file_path)
         self.action_refresh()
 
     def action_set_as_main_file(self):
+
         path = self.get_location_by_index(self.selected)
         self.project["mainfile"] = str(path)
         self.update_global_data()
@@ -784,7 +853,11 @@ class Command:
 
             self.project_file_path = path
             with path.open("w", encoding='utf8') as fout:
-                json.dump(d, fout, indent=4)
+                json.dump(d, fout, indent=2)
+
+            # any saving of project file makes on_start On
+            self.options['on_start'] = True
+            self.save_events()
 
             self.update_global_data()
             print(_('Saving project: ') + collapse_filename(str(path)))
@@ -807,8 +880,44 @@ class Command:
     def menu_cfg(self):
         if self.h_menu_cfg is None:
             self.h_menu_cfg = menu_proc(0, MENU_CREATE)
-            menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.action_project_properties', caption=_('Project properties...'))
-            menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.action_config', caption=_('Project Manager options...'))
+        menu_proc(self.h_menu_cfg, MENU_CLEAR)
+
+        cur_name = self.session_cur_name()
+
+        names = self.session_get_names()
+        if names:
+            for (index, name) in enumerate(names):
+                id = menu_proc(self.h_menu_cfg, MENU_ADD,
+                    command="module=cuda_project_man;cmd=session_load;info=%s;"%name,
+                    caption=_('Project session:')+' '+name
+                    )
+                if name==cur_name:
+                    menu_proc(id, MENU_SET_ENABLED, command=False)
+        else:
+            id = menu_proc(self.h_menu_cfg, MENU_ADD, caption=_('Project session:'))
+            menu_proc(id, MENU_SET_ENABLED, command=False)
+
+        menu_proc(self.h_menu_cfg, MENU_ADD, caption='-')
+        id = menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.session_save_as', caption=_('Save session...'))
+        if self.is_project_empty():
+            menu_proc(id, MENU_SET_ENABLED, command=False)
+
+        id = menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.session_delete', caption=_('Delete session...'))
+        if not names:
+            menu_proc(id, MENU_SET_ENABLED, command=False)
+
+        id = menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.session_def', caption=_('Set default session...'))
+        if not names:
+            menu_proc(id, MENU_SET_ENABLED, command=False)
+
+        id = menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.session_forget_ex', caption=_('Forget session, close all tabs'))
+        sess = app_path(APP_FILE_SESSION)
+        if os.path.basename(sess)=='history session.json':
+            menu_proc(id, MENU_SET_ENABLED, command=False)
+
+        menu_proc(self.h_menu_cfg, MENU_ADD, caption='-')
+        menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.action_project_properties', caption=_('Project properties...'))
+        menu_proc(self.h_menu_cfg, MENU_ADD, command='cuda_project_man.action_config', caption=_('Project Manager options...'))
 
         menu_proc(self.h_menu_cfg, MENU_SHOW)
 
@@ -844,7 +953,7 @@ class Command:
 
     def save_options(self):
         with self.options_filename.open(mode="w", encoding='utf8') as fout:
-            json.dump(self.options, fout, indent=4)
+            json.dump(self.options, fout, indent=2)
 
     def menu_recents(self):
         items = self.options["recent_projects"]
@@ -883,6 +992,7 @@ class Command:
         self.action_new_project()
         self.add_node(fn)
         self.do_unfold_first()
+
         app_proc(PROC_SIDEPANEL_ACTIVATE, self.title)
 
     def open_dir(self, dirname, new_proj=False):
@@ -925,11 +1035,21 @@ class Command:
                     'vis': self.options.get('toolbar', True)
                     })
 
+            self.save_events()
+
+    def save_events(self):
             ev = []
+
             if self.options['on_start']:
-                ev += ['on_start']
-            if self.options['check_git']:
-                ev += ['on_open']
+                ev.append('on_start')
+
+            v = self.options.get('check_git', None)
+            if v is None:
+                s = ini_read('plugins.ini', 'events', 'cuda_project_man', '')
+                v = 'on_open' in s
+            if v:
+                ev.append('on_open')
+
             if ev:
                 ini_write('plugins.ini', 'events', 'cuda_project_man', ','.join(ev))
             else:
@@ -1002,7 +1122,7 @@ class Command:
 
     def enum_all(self, callback):
         """
-        Callback for all items.
+        Enum for all items.
         Until callback gets false.
         """
         items = tree_proc(self.tree, TREE_ITEM_ENUM, 0)
@@ -1025,9 +1145,51 @@ class Command:
                     return False
         return True
 
+
+    def enum_all_getfolds(self, unfolds):
+        items = tree_proc(self.tree, TREE_ITEM_ENUM, 0)
+        if items:
+            return self.enum_subitems_getfolds(items[0][0], unfolds)
+
+    def enum_subitems_getfolds(self, item, unfolds):
+        items = tree_proc(self.tree, TREE_ITEM_ENUM_EX, item)
+        if items:
+            for i in items:
+                if i['sub_items']:
+                    id = i['id']
+                    prop = tree_proc(self.tree, TREE_ITEM_GET_PROPS, id)
+                    if not prop['folded']:
+                        fn = i.get('data', '')
+                        if fn:
+                            unfolds.append(fn)
+                    self.enum_subitems_getfolds(id, unfolds)
+
+
+    def enum_all_setfolds(self, unfolds):
+        if not unfolds:
+            return
+        items = tree_proc(self.tree, TREE_ITEM_ENUM, 0)
+        if items:
+            return self.enum_subitems_setfolds(items[0][0], unfolds)
+
+    def enum_subitems_setfolds(self, item, unfolds):
+        items = tree_proc(self.tree, TREE_ITEM_ENUM_EX, item)
+        if items:
+            for i in items:
+                if i['sub_items']:
+                    id = i['id']
+                    fn = i.get('data', '')
+                    if fn in unfolds:
+                        tree_proc(self.tree, TREE_ITEM_UNFOLD, id)
+                        unfolds.remove(fn)
+                    #else:
+                    #    tree_proc(self.tree, TREE_ITEM_FOLD, id)
+                    self.enum_subitems_setfolds(id, unfolds)
+
+
     def enum_all_fn(self, filename, and_open):
         """
-        Callback for all items.
+        Enum for all items.
         Find 'filename', and focus its node.
         """
         items = tree_proc(self.tree, TREE_ITEM_ENUM, 0)
@@ -1066,6 +1228,42 @@ class Command:
 
         return True
 
+
+    def enum_all_sel(self, filename):
+        """
+        Enum for all items.
+        Find 'filename', and select/show its node.
+        """
+        items = tree_proc(self.tree, TREE_ITEM_ENUM, 0)
+        if items:
+            return self.enum_subitems_sel(items[0][0], filename)
+
+    def enum_subitems_sel(self, item_src, filename):
+        """
+        Callback for all subitems of given item_src.
+        When found 'filename', focus it and return False
+        """
+
+        prop_list = tree_proc(self.tree, TREE_ITEM_ENUM_EX, item_src) or []
+        for prop in prop_list:
+            fn = prop['data']
+            is_dir = prop['sub_items']
+
+            if is_dir:
+                node = prop['id']
+                if not self.enum_subitems_sel(node, filename):
+                    return False
+
+            elif fn==filename:
+                node = prop['id']
+                tree_proc(self.tree, TREE_ITEM_SELECT, node)
+                tree_proc(self.tree, TREE_ITEM_SHOW, node)
+                #print('enum_subitems_sel found node!')
+                return False
+
+        return True
+
+
     def menu_goto(self):
         """ Show menu-dialog with all files in project, and jump to chosen file """
         if not self.tree:
@@ -1073,7 +1271,7 @@ class Command:
             return
 
         files = self.enum_all_files()
-        if not files:
+        if self.is_project_empty():
             msg_status(_('Project is empty'))
             return
 
@@ -1129,7 +1327,8 @@ class Command:
         if items:
             for handle, _ in items:
                 tree_proc(self.tree, TREE_ITEM_DELETE, handle)
-        self.action_refresh(data)
+
+        self.action_refresh_int(data) # call _int version, to avoid recursion
 
     def tree_on_menu(self, id_dlg, id_ctl, data='', info=''):
 
@@ -1276,6 +1475,9 @@ class Command:
         else:
             msg_status(_('Project main file is not set'))
 
+    def is_project_empty(self):
+        return not bool(self.project['nodes'])
+
     def enum_all_files(self):
         files, dirs = [], []
         for root in self.project['nodes']:
@@ -1303,7 +1505,7 @@ class Command:
             return
 
         files = self.enum_all_files()
-        if not files:
+        if self.is_project_empty():
             msg_status(_('Project is empty'))
             return
 
@@ -1320,7 +1522,8 @@ class Command:
         self.init_panel(False)
 
         if not self.project_file_path:
-            self.action_project_for_git(ed_self.get_filename('*'))
+            fn = ed_self.get_filename('*')
+            self.action_project_for_git(fn)
 
     def action_project_for_git(self, filename):
 
@@ -1330,7 +1533,7 @@ class Command:
             fn2 = os.path.join(dir, '.svn')
             if os.path.isdir(fn) or os.path.isdir(fn2):
                 self.init_panel()
-                self.new_project()
+                self.new_project(True, False)
                 self.add_node(dir)
                 self.jump_to_filename(filename)
                 return
@@ -1341,3 +1544,259 @@ class Command:
             if d==dir:
                 return
             dir = d
+
+    def session_cur_name(self):
+
+        fn_proj = str(self.project_file_path)
+        if not fn_proj:
+            return ''
+
+        s = ''
+        sess = app_path(APP_FILE_SESSION)
+        if '|' in sess:
+            l = sess.split('|')
+            if l[0] == fn_proj:
+                s = l[1]
+                k = '/sessions/'
+                if s.startswith(k):
+                    s = s[len(k):]
+        return s
+
+    def session_get_names(self):
+
+        res = []
+        fn = self.project_file_path
+        if fn and os.path.isfile(fn):
+            with open(fn, 'r', encoding='utf8') as f:
+                data = json.load(f)
+                k = data.get('sessions')
+                if type(k)==dict:
+                    res = list(k.keys())
+        return res
+
+    def session_def(self):
+
+        names = self.session_get_names()
+        if not names:
+            return msg_status(_('No project sessions'))
+        names = [_('(none)')]+names
+
+        curname = self.project.get('def_session', '')
+        if curname in names:
+            focused = names.index(curname)
+        else:
+            focused = 0
+
+        res = dlg_menu(DMENU_LIST, names, focused=focused, caption=_('Set default project session'))
+        if res is None:
+            return
+        curname = names[res] if res>0 else ''
+        self.project['def_session'] = curname
+
+        fn = self.project_file_path
+        if fn and os.path.isfile(fn):
+            with open(fn, 'r', encoding='utf8') as f:
+                data = json.load(f)
+            data['def_session'] = curname
+            with open(fn, 'w', encoding='utf8') as f:
+                json.dump(data, f, indent=2)
+
+    def session_delete(self):
+
+        if self.is_project_empty():
+            msg_status(_('Project is empty'))
+            return
+
+        names = self.session_get_names()
+        if not names:
+            return msg_status(_('No project sessions'))
+
+        res = dlg_menu(DMENU_LIST, names, caption=_('Delete project session'))
+        if res is None:
+            return
+        name = names[res]
+
+        fn = self.project_file_path
+        if fn and os.path.isfile(fn):
+            with open(fn, 'r', encoding='utf8') as f:
+                data = json.load(f)
+            if data.get('sessions'):
+                del data['sessions'][name]
+            with open(fn, 'w', encoding='utf8') as f:
+                json.dump(data, f, indent=2)
+
+    def session_delete_all(self):
+
+        fn = self.project_file_path
+        if fn and os.path.isfile(fn):
+            with open(fn, 'r', encoding='utf8') as f:
+                data = json.load(f)
+            if data.get('sessions'):
+                del data['sessions']
+            with open(fn, 'w', encoding='utf8') as f:
+                json.dump(data, f, indent=2)
+
+    def session_save_as(self):
+
+        fn = str(self.project_file_path)
+        if not fn:
+            msg_status(_('Untitled project'))
+
+        if self.is_project_empty():
+            msg_status(_('Project is empty'))
+            return
+
+        self.close_foreign_tabs(True)
+
+        names = self.session_get_names()
+        s = 'new'
+        while True:
+            s = dlg_input(_('Save session with name:'), s)
+            if s is None:
+                return
+            s = s.strip()
+            if not s:
+                msg_status(_('Empty session name'))
+                continue
+            if not is_session_name(s):
+                msg_status(_('Not allowed char(s) in the session name'))
+                continue
+            if s in names:
+                msg_status(_('Session "%s" already exists')%s)
+                continue
+            break
+
+        sess = fn+'|/sessions/'+s
+        app_proc(PROC_SAVE_SESSION, sess)
+        app_proc(PROC_SET_SESSION, sess)
+
+    def session_load_menu(self):
+
+        names = self.session_get_names()
+        res = dlg_menu(DMENU_LIST, names, caption=_('Open project session'))
+        if res is None:
+            return
+        self.session_load(names[res])
+
+    def session_load(self, name='', confirm_save=True):
+
+        if not name:
+            return
+
+        if not name in self.session_get_names():
+            msg_status(_('Project session "%s" not found')%name)
+            return
+
+        fn = str(self.project_file_path)
+        if not fn:
+            msg_status(_('Untitled project'))
+
+        if confirm_save:
+            sess = app_path(APP_FILE_SESSION)
+            sess = collapse_filename(sess)
+            if msg_box(_('Save current state to the session "%s"?')%sess, MB_OKCANCEL+MB_ICONQUESTION)==ID_OK:
+                app_proc(PROC_SAVE_SESSION, sess)
+
+        app_proc(PROC_SET_SESSION, '')
+
+        fn += '|/sessions/'+name
+        app_proc(PROC_LOAD_SESSION, fn)
+
+    def is_project_filename(self, filename):
+        '''Deprecated func'''
+
+        if not filename:
+            return False
+        for fn in self.project["nodes"]:
+            if os.path.isdir(fn):
+                if filename.startswith(fn+os.sep):
+                    return True
+            else:
+                if filename==fn:
+                    return True
+        return False
+
+    def close_foreign_tabs(self, confirm=True):
+
+        if not self.options.get('close_ext', True):
+            return
+
+        # don't detect if project is empty
+        items = self.project['nodes']
+        if not items:
+            return
+
+        files, dirs = [], []
+        for root in items:
+            if os.path.isdir(root):
+                dirs.append(root)
+            else:
+                files.append(root)
+
+        def is_from_proj(fn):
+            if not fn: # untitled tabs: False
+                return False
+            for d in dirs:
+                if fn.startswith(d+os.sep):
+                    return True
+            for f in files:
+                if f==fn:
+                    return True
+            return False
+
+        import cudatext_cmd as cmds
+
+        res = []
+        for h in ed_handles():
+            e = Editor(h)
+            fn = e.get_filename('*')
+
+            #skip empty tabs
+            if (not fn) and (not e.get_text_all()):
+                continue
+
+            if not is_from_proj(fn):
+                res.append((h, fn))
+
+        if res:
+            msg_ = _('CudaText has opened %d tab(s) not belonging to the project "%s". Close them?')
+            msg = msg_%(len(res), self.get_project_name())
+
+            names = []
+            for (h, fn) in res:
+                if fn:
+                    names.append(collapse_filename(fn))
+                else:
+                    e = Editor(h)
+                    names.append(e.get_prop(PROP_TAB_TITLE))
+                if len(names)>=8:
+                    names.append('...')
+                    break
+            msg += '\n\n'+'\n'.join(names)
+
+            if not confirm or msg_box(msg, MB_OKCANCEL+MB_ICONQUESTION)==ID_OK:
+                for (h, fn) in reversed(res):
+                    e = Editor(h)
+                    e.set_prop(PROP_MODIFIED, False)
+                    e.cmd(cmds.cmd_FileClose)
+                    time.sleep(0.2)
+
+    def session_forget(self):
+
+        app_proc(PROC_SET_SESSION, '')
+
+    def session_forget_ex(self):
+
+        self.session_forget()
+
+        import cudatext_cmd as cmds
+        ed.cmd(cmds.cmd_FileCloseAll)
+
+    def on_delete_file(self, ed_self, fn):
+
+        #print('on_delete_file', fn)
+        if fn in self.project["nodes"]:
+            self.project["nodes"].remove(fn)
+            self.action_refresh()
+            if self.project_file_path:
+                self.action_save_project_as(self.project_file_path)

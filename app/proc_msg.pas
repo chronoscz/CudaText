@@ -17,8 +17,8 @@ uses
   ATSynEdit;
 
 const
-  cAppExeVersion = '1.156.0.2';
-  cAppApiVersion = 415;
+  cAppExeVersion = '1.162.5.0';
+  cAppApiVersion = 420;
 
 const
   cOptionSystemSuffix =
@@ -55,9 +55,9 @@ const
 const
   EOL = #10;
   msgPythonListError = 'Cannot create new list object'; //no need i18n
-  msgCallbackBad = 'Bad API callback, report to plugin author: %s'; //no i18n
-  msgCallbackDeprecated = 'Deprecated API callback, report to plugin author: %s'; //no i18n
-  msgApiDeprecated = 'Deprecated API usage: %s'; //no i18n
+  msgCallbackBad = 'NOTE: Bad API callback, report to plugin author: %s'; //no i18n
+  msgCallbackDeprecated = 'NOTE: Deprecated API callback, report to plugin author: %s'; //no i18n
+  msgApiDeprecated = 'NOTE: Deprecated API usage: %s'; //no i18n
   msgErrorInTheme = 'NOTE: Theme "%s" misses item "%s"';
   msgRescannedAllPlugins = 'Rescanned all plugins';
   msgWelcomeTabTitle = '(welcome)';
@@ -304,6 +304,7 @@ const
   msgStatusHotkeyBusy: string = 'Hotkey is busy: %s';
   msgStatusChangedLinesCount: string = 'Changed %d lines';
   msgStatusFontSizeChanged: string = 'Font size changed to %d%%';
+  msgStatusLexerDisabledBySize: string = 'Option "ui_max_size_lexer":%d disables lexer "%s" in this file (%d Mb)';
 
   msgConfirmHotkeyBusy: string = 'Hotkey is already occupied by command:'#10'%s'#10#10'Overwrite it?';
   msgConfirmHotkeyList: string = 'hotkeys (%d): %s';
@@ -352,8 +353,9 @@ const
       '  -s=folder       - Set full path of "settings" folder'+EOL+
       '  -i              - Open contents of stdin in new tab (Unix only)'+EOL+
       '  -id=name - Set single-instance id, for groups of instances (Unix, default: cudatext.0)'+EOL+
-      '  -w=left,top,width,height - Set position/size of app window'+EOL+
-      '  -p=cuda_somename#param1#param2... - Run plugin action via command-line'+EOL+
+      '  -w=left,top,width,height        - Set position/size of the main window'+EOL+
+      '  -c=cuda_module,method           - Run command plugin on startup'+EOL+
+      '  -p=cuda_module#param1#param2... - Run event "on_cli" on startup'+EOL+
       ''+EOL+
       'Filenames can be with ":line" or ":line:column" suffix to place caret.'+EOL+
       'Folder can be passed, will be opened in Project Manager plugin.'+EOL+

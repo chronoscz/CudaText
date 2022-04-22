@@ -397,6 +397,7 @@ begin
     fmFind:= TfmFind.Create(Self);
     fmFind.OnResult:= @FindDialogDone2;
     fmFind.OnChangeOptions:= @DoFindOptions_OnChange;
+    fmFind.OnChangeVisible:= @FinderFormChangeVisible;
     fmFind.OnFocusEditor:= @FindDialogFocusEditor;
     fmFind.OnGetMainEditor:= @FindDialogGetMainEditor;
     fmFind.OnGetToken:= @FinderOnGetToken;
@@ -512,11 +513,13 @@ begin
   fmFind.UpdateInputFind(StrSuggested);
   fmFind.IsReplace:= AReplaceMode;
 
+  UpdateFindDialogParent;
   //MsgLogDebug('find dlg: update state');
   fmFind.UpdateState(true);
   //MsgLogDebug('find dlg: show');
   fmFind.Show;
   //MsgLogDebug('find dlg: focus');
+  fmFind.UpdateFormHeight; //update 'Replace' buttons visibility, when dlg is in the floating-grp-form
 
   UpdateFindDialogEnabled(Frame);
   if fmFind.Enabled then
@@ -588,12 +591,16 @@ begin
   if fmFind.Visible then
   begin
     if fmFind.IsReplace<>AReplaceMode then
-      fmFind.IsReplace:= AReplaceMode
+    begin
+      UpdateFindDialogParent;
+      fmFind.IsReplace:= AReplaceMode;
+    end
     else
       fmFind.Hide;
   end
   else
   begin
+    UpdateFindDialogParent;
     fmFind.IsReplace:= AReplaceMode;
     fmFind.Show;
   end;
@@ -956,22 +963,20 @@ begin
     );
   Ed.Update(true);
 
-  fmConfirmReplace:= TfmConfirmReplace.Create(Self);
-  try
-    fmConfirmReplace.MsgLineNumber:= APos1.Y+1;
-    fmConfirmReplace.bYesAll.Enabled:= AForMany;
-    fmConfirmReplace.bNoAll.Enabled:= AForMany;
-    if Assigned(fmFind) then
-    begin
-      Pnt:= fmFind.ClientToScreen(Point(0, 0));
-      fmConfirmReplace.Left:= Pnt.X;
-      fmConfirmReplace.Top:= Pnt.Y;
-      //fmConfirmReplace.Width:= fmFind.Width;
-    end;
-    Res:= fmConfirmReplace.ShowModal;
-  finally
-    FreeAndNil(fmConfirmReplace);
+  if fmConfirmReplace=nil then
+    fmConfirmReplace:= TfmConfirmReplace.Create(Self);
+
+  fmConfirmReplace.MsgLineNumber:= APos1.Y+1;
+  fmConfirmReplace.bYesAll.Enabled:= AForMany;
+  fmConfirmReplace.bNoAll.Enabled:= AForMany;
+  if Assigned(fmFind) then
+  begin
+    Pnt:= fmFind.ClientToScreen(Point(0, 0));
+    fmConfirmReplace.Left:= Pnt.X;
+    fmConfirmReplace.Top:= Pnt.Y;
+    //fmConfirmReplace.Width:= fmFind.Width;
   end;
+  Res:= fmConfirmReplace.ShowModal;
 
   Ed.BeginUpdate;
   AConfirm:= Res in [mrYes, mrYesToAll];
@@ -1408,5 +1413,28 @@ begin
     Ed.DoCommand(NCmd, cInvokeHotkey);
     Result:= true;
   end;
+end;
+
+procedure TfmMain.FinderFormChangeVisible(Sender: TObject);
+begin
+  UpdateSidebarButtonFind;
+end;
+
+procedure TfmMain.UpdateFindDialogParent;
+var
+  F: TCustomForm;
+begin
+  if UiOps.FindSeparateForm then exit;
+  if fmFind=nil then exit;
+  if fmFind.Parent=nil then exit;
+
+  F:= Screen.ActiveForm;
+  if F=Self then
+    fmFind.Parent:= Self.PanelMain
+  else
+  if (F=FFormFloatGroups1) or
+    (F=FFormFloatGroups2) or
+    (F=FFormFloatGroups3) then
+    fmFind.Parent:= F;
 end;
 

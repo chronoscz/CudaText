@@ -172,8 +172,8 @@ begin
   CodeTree.Invalidate;
 
   //proc_sidepanel_add_dialog
-  for i:= 0 to CustomDialogs.Count-1 do
-    DoApplyThemeToCustomDialog(TFormDummy(CustomDialogs[i]));
+  for i:= 0 to AppCustomDialogs.Count-1 do
+    DoApplyThemeToCustomDialog(TFormDummy(AppCustomDialogs[i]));
 
   //apply AppTheme to all frames
   DoApplyLexerStylesMapsToFrames(true);
@@ -191,11 +191,29 @@ procedure TfmMain.DoApplyTheme_ThemedMainMenu;
 {$ifdef windows}
 var
   NColor: TColor;
+  NPadding: integer;
+  SPadding: string;
+  i: integer;
 {$endif}
 begin
   {$ifdef windows}
-  MenuStylerTheme.FontName:= UiOps.ThemedMainMenuFontName;
-  MenuStylerTheme.FontSize:= UiOps.ThemedMainMenuFontSize;
+  if (UiOps.ThemedMainMenuFontName<>'default') or
+    (UiOps.ThemedMainMenuFontSize<>9) then
+  begin
+    MenuStylerTheme.FontName:= UiOps.ThemedMainMenuFontName;
+    MenuStylerTheme.FontSize:= UiOps.ThemedMainMenuFontSize;
+
+    if UiOps.ThemedMainMenuFontSize>9 then
+    begin
+      //padding is to make MainMenu root items wider,
+      //we can also do it by calling RecreateWnd(Self) but it's slow, about 30ms on Intel Core i3
+      NPadding:= UiOps.ThemedMainMenuFontSize div 6;
+      SPadding:= StringOfChar(' ', NPadding);
+      for i:= 0 to MainMenu.Items.Count-1 do
+        with MainMenu.Items[i] do
+          Caption:= Trim(Caption)+SPadding;
+    end;
+  end;
 
   NColor:= GetAppColor(apclMenuBg);
   if NColor=clNone then
@@ -326,38 +344,6 @@ begin
     Ext:= AppExtensionThemeSyntax;
 
   Result:= FileExists(AppDir_DataThemes+DirectorySeparator+AName+Ext);
-end;
-
-procedure TfmMain.mnuEditClick(Sender: TObject);
-var
-  Ed: TATSynEdit;
-  bSel: boolean;
-begin
-  Ed:= CurrentEditor;
-  if Ed=nil then exit;
-
-  bSel:= Ed.Carets.IsSelection;
-
-  if Assigned(mnuEditUndo) then
-    mnuEditUndo.Enabled:= not Ed.Strings.UndoEmpty;
-
-  if Assigned(mnuEditRedo) then
-    mnuEditRedo.Enabled:= not Ed.Strings.RedoEmpty;
-
-  if Assigned(mnuEditPaste) then
-    mnuEditPaste.Enabled:= Clipboard.HasFormat(CF_Text);
-
-  if Assigned(mnuEditCopy) then
-    mnuEditCopy.Enabled:= Ed.OptCopyLinesIfNoSel or bSel;
-
-  if Assigned(mnuEditCut) then
-    mnuEditCut.Enabled:= Ed.OptCutLinesIfNoSel or bSel;
-
-  if Assigned(mnuEditDel) then
-    mnuEditDel.Enabled:= bSel;
-
-  if Assigned(mnuEditCopyAppend) then
-    mnuEditCopyAppend.Enabled:= bSel;
 end;
 
 procedure TfmMain.DoDialogTheme(AThemeUI: boolean);

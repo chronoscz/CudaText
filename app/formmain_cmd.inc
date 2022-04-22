@@ -133,6 +133,9 @@ begin
           DoFileExportHtml(Frame);
       end;
 
+    cmd_FileReopenRecent:
+      DoFileReopenRecent;
+
     cmd_OpenContainingFolder:
       begin
         if Ed.FileName<>'' then
@@ -598,24 +601,6 @@ begin
         end;
       end;
 
-    cmd_MacroStop: //deprecated at 2021.10
-      begin
-        if Assigned(Frame) then
-        begin
-          Frame.DoMacroStop(false);
-          MsgStatus('');
-        end;
-      end;
-
-    cmd_MacroCancel: //deprecated at 2021.10
-      begin
-        if Assigned(Frame) then
-        begin
-          Frame.DoMacroStop(true);
-          MsgStatus('');
-        end;
-      end;
-
     cmd_TreeGotoNext:
       DoTreeviewJump(CodeTree.Tree, treeGoNext);
     cmd_TreeGotoPrev:
@@ -724,7 +709,6 @@ begin
   end;
 end;
 
-
 procedure TfmMain.FrameOnEditorCommand(Sender: TObject; ACommand: integer;
   AInvoke: TATEditorCommandInvoke; const AText: string; var AHandled: boolean);
 var
@@ -779,19 +763,31 @@ begin
 
     cmd_RepaintEditor:
       begin
-        //Ed.InvalidateEx is to fix repainting with cuda_sync_scroll with "renderer_anti_flicker":20;
-        //otherwise, Ed.Update is enough
-        Ed.InvalidateEx(true, false);
+        //params 2nd/3rd are to fix repainting with cuda_sync_scroll with "renderer_anti_flicker":20;
+        Ed.Update(false, true, false);
         AHandled:= true;
         exit
       end;
 
+    cmd_TabUsesSpaces_On:
+      begin
+        Ed.OptTabSpaces:= true;
+        AHandled:= true;
+        exit
+      end;
+    cmd_TabUsesSpaces_Off:
+      begin
+        Ed.OptTabSpaces:= false;
+        AHandled:= true;
+        exit
+      end;
     cmd_ToggleTabUsesSpaces:
       begin
         Ed.OptTabSpaces:= not Ed.OptTabSpaces;
         AHandled:= true;
         exit
       end;
+
     cmd_ConvertTabsToSpaces:
       begin
         Ed.DoConvertTabsToSpaces;
@@ -977,6 +973,31 @@ begin
         exit
       end;
 
+    cmd_LineEndWin_Caret:
+      begin
+        UpdateEditorCaretLineEnds(Frame, Ed, cEndWin);
+        AHandled:= true;
+        exit
+      end;
+    cmd_LineEndUnix_Caret:
+      begin
+        UpdateEditorCaretLineEnds(Frame, Ed, cEndUnix);
+        AHandled:= true;
+        exit
+      end;
+    cmd_LineEndMac_Caret:
+      begin
+        UpdateEditorCaretLineEnds(Frame, Ed, cEndMac);
+        AHandled:= true;
+        exit
+      end;
+    cmd_LineEndDefault_Caret:
+      begin
+        UpdateEditorCaretLineEnds(Frame, Ed, Ed.Strings.Endings);
+        AHandled:= true;
+        exit
+      end;
+
     cmd_SplitTabToggle:
       begin
         if Assigned(Frame) then
@@ -1100,6 +1121,25 @@ begin
           SClipboardCopy(UTF8Encode(Str));
           MsgStatus(msgStatusCopiedLink);
         end;
+        AHandled:= true;
+        exit
+      end;
+
+    cmd_TabSize_Set2:
+      begin
+        Ed.OptTabSize:= 2;
+        AHandled:= true;
+        exit
+      end;
+    cmd_TabSize_Set4:
+      begin
+        Ed.OptTabSize:= 4;
+        AHandled:= true;
+        exit
+      end;
+    cmd_TabSize_Set8:
+      begin
+        Ed.OptTabSize:= 8;
         AHandled:= true;
         exit
       end;

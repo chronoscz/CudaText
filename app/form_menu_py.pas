@@ -15,7 +15,7 @@ uses
   Classes, SysUtils, FileUtil, Forms, Controls, Graphics,
   ExtCtrls, Dialogs,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Edits,
   ATStringProc,
   ATListbox,
@@ -50,6 +50,8 @@ type
     { private declarations }
     FMultiline: boolean;
     listFiltered: TFPList;
+    listFiltered_Simple: TFPList;
+    listFiltered_Fuzzy: TFPList;
     FColorBg: TColor;
     FColorBgSel: TColor;
     FColorFont: TColor;
@@ -58,7 +60,7 @@ type
     FColorFontHilite: TColor;
     procedure DoFilter;
     function GetResultCmd: integer;
-    function IsFiltered(AOrigIndex: integer): boolean;
+    function IsFiltered(AOrigIndex: integer; out ASimpleMatch: boolean): boolean;
     procedure SetListCaption(const AValue: string);
   public
     { public declarations }
@@ -158,6 +160,8 @@ begin
   ResultCode:= -1;
   listItems:= TStringlist.Create;
   listFiltered:= TFPList.Create;
+  listFiltered_Simple:= TFPList.Create;
+  listFiltered_Fuzzy:= TFPList.Create;
 end;
 
 procedure TfmMenuApi.editChange(Sender: TObject);
@@ -172,6 +176,8 @@ end;
 
 procedure TfmMenuApi.FormDestroy(Sender: TObject);
 begin
+  FreeAndNil(listFiltered_Fuzzy);
+  FreeAndNil(listFiltered_Simple);
   FreeAndNil(listFiltered);
   FreeAndNil(listItems);
 end;
@@ -385,12 +391,24 @@ end;
 
 procedure TfmMenuApi.DoFilter;
 var
+  bSimple: boolean;
   i: integer;
 begin
   listFiltered.Clear;
+  listFiltered_Simple.Clear;
+  listFiltered_Fuzzy.Clear;
+
   for i:= 0 to listItems.Count-1 do
-    if IsFiltered(i) then
-      listFiltered.Add(Pointer(PtrInt(i)));
+    if IsFiltered(i, bSimple) then
+    begin
+      if bSimple then
+        listFiltered_Simple.Add(Pointer(PtrInt(i)))
+      else
+        listFiltered_Fuzzy.Add(Pointer(PtrInt(i)));
+    end;
+
+  listFiltered.AddList(listFiltered_Simple);
+  listFiltered.AddList(listFiltered_Fuzzy);
 
   list.ItemIndex:= 0;
   list.ItemTop:= 0;
@@ -398,10 +416,12 @@ begin
   list.Invalidate;
 end;
 
-function TfmMenuApi.IsFiltered(AOrigIndex: integer): boolean;
+function TfmMenuApi.IsFiltered(AOrigIndex: integer; out ASimpleMatch: boolean): boolean;
 var
   SFind, SText: string;
 begin
+  ASimpleMatch:= true;
+
   SText:= listItems[AOrigIndex];
   if DisableFullFilter then
     SText:= SGetItem(SText, #9);
@@ -410,7 +430,7 @@ begin
   if SFind='' then exit(true);
 
   if UiOps.ListboxFuzzySearch and not DisableFuzzy then
-    Result:= STextListsFuzzyInput(SText, SFind)
+    Result:= STextListsFuzzyInput(SText, SFind, ASimpleMatch)
   else
     Result:= STextListsAllWords(SText, SFind);
 end;
@@ -430,4 +450,3 @@ begin
 end;
 
 end.
-

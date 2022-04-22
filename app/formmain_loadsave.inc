@@ -201,7 +201,7 @@ begin
     cfg.SetValue('session', AppSessionName_ForHistoryFile);
     cfg.SetValue('last_cmd', FLastSelectedCommand);
 
-    DoOps_SaveHistory_GroupView(cfg);
+    DoOps_SaveHistory_GroupView(cfg, '');
   finally
     cfg.Free;
   end;
@@ -225,24 +225,29 @@ begin
   AppMakeBackupFiles(ASessionFilename, '.cuda-session', UiOps.BackupLastSessions);
 end;
 
-function TfmMain.DoOps_SaveSession(const AFileName: string;
+function TfmMain.DoOps_SaveSession(const ASessionId: string;
   ASaveModifiedFiles, ASaveUntitledTabs, AByTimer: boolean): boolean;
 var
   cfg: TJSONConfig;
   Frame: TEditorFrame;
   Gr: TATGroups;
   Pages: TATPages;
-  sFilename, sFilename2: string;
+  AFileName, sFilename, sFilename2, sRootPath: string;
   nLocalGroup, nGlobalGroup, nTab, i: integer;
   nCountFiles, nCountUntitled: integer;
   path, value: string;
   bModified, bUntitled: boolean;
 begin
   Result:= false;
-  if AFileName='' then exit;
+  if ASessionId='' then exit;
 
-  AppDiskCheckFreeSpace(AFileName);
-  DeleteFile(AFileName);
+  SSplitByChar(ASessionId, '|', AFileName, sRootPath);
+
+  if sRootPath='' then
+  begin
+    AppDiskCheckFreeSpace(AFileName);
+    DeleteFile(AFileName);
+  end;
 
   nCountFiles:= 0;
   nCountUntitled:= 0;
@@ -252,6 +257,8 @@ begin
     try
       cfg.Formatted:= true;
       cfg.Filename:= AFileName;
+      if sRootPath<>'' then
+        cfg.DeletePath(sRootPath); //otherwise sections '000' will not be removed
     except
       on E: Exception do
       begin
@@ -260,29 +267,29 @@ begin
       end;
     end;
 
-    DoOps_SaveHistory_GroupView(cfg);
+    DoOps_SaveHistory_GroupView(cfg, sRootPath);
 
     for i:= 0 to cAppMaxGroup do
     begin
       Pages:= TGroupsHelper.GetPagesOfGroupIndex(i);
       if Pages=nil then Continue;
-      cfg.SetValue('/tab_index/g'+IntToStr(i), Pages.Tabs.TabIndex);
+      cfg.SetValue(sRootPath+'/tab_index/g'+IntToStr(i), Pages.Tabs.TabIndex);
     end;
-    cfg.SetValue('/tab_index/g_active', Groups.FindPages(Groups.PagesCurrent));
+    cfg.SetValue(sRootPath+'/tab_index/g_active', Groups.FindPages(Groups.PagesCurrent));
 
-    cfg.SetValue('/panels/side_show', AppPanels[cPaneSide].Visible);
-    cfg.SetValue('/panels/side_panel', AppPanels[cPaneSide].LastActivePanel);
+    cfg.SetValue(sRootPath+'/panels/side_show', AppPanels[cPaneSide].Visible);
+    cfg.SetValue(sRootPath+'/panels/side_panel', AppPanels[cPaneSide].LastActivePanel);
 
     with AppPanels[cPaneSide] do
       if not Floating then
-        cfg.SetValue('/panels/side_size', PanelSize);
+        cfg.SetValue(sRootPath+'/panels/side_size', PanelSize);
 
-    cfg.SetValue('/panels/bottom_show', AppPanels[cPaneOut].Visible);
-    cfg.SetValue('/panels/bottom_panel', AppPanels[cPaneOut].LastActivePanel);
+    cfg.SetValue(sRootPath+'/panels/bottom_show', AppPanels[cPaneOut].Visible);
+    cfg.SetValue(sRootPath+'/panels/bottom_panel', AppPanels[cPaneOut].LastActivePanel);
 
     with AppPanels[cPaneOut] do
       if not Floating then
-        cfg.SetValue('/panels/bottom_size', PanelSize);
+        cfg.SetValue(sRootPath+'/panels/bottom_size', PanelSize);
 
     for i:= 0 to FrameCount-1 do
     begin
@@ -308,7 +315,7 @@ begin
       else
         Inc(nCountFiles);
 
-      path:= '/'+Format('%3.3d', [i]);
+      path:= sRootPath+'/'+Format('%3.3d', [i]);
 
       GetFrameLocation(Frame, Gr, Pages, nLocalGroup, nGlobalGroup, nTab);
       bModified:= Frame.Ed1.Modified or (bUntitled and not Frame.IsEmpty);
@@ -396,13 +403,13 @@ begin
   Result:= StrToIntDef(s, -1)>=0;
 end;
 
-function TfmMain.DoOps_LoadSession(const AFileName: string;
-  AllowShowPanels: boolean): boolean;
+function TfmMain.DoOps_LoadSession(const ASessionId: string; AllowShowPanels: boolean): boolean;
 var
   cfg: TJSONConfig;
   Frame: TEditorFrame;
+  Ed: TATSynEdit;
   list: TStringlist;
-  sFilename, sFilename2,
+  AFileName, sFilename, sFilename2, sRootPath,
   sTabTitle, sKind, sOpenOptions,
   item_path, item_path2: string;
   nCountFiles, nCountFilesModified, nCountFilesBefore: integer;
@@ -419,16 +426,16 @@ const
   SOptionNoHistory = '/nohistory /nolexerdetect /noevent /noopenedevent /nononeevent';
 begin
   Result:= false;
-  if AFileName='' then exit;
+  if ASessionId='' then exit;
+
+  SSplitByChar(ASessionId, '|', AFileName, sRootPath);
   if not FileExists(AFileName) then exit;
 
   //fix issue #3734
   if not IsDefaultSessionActive then
   begin
-    sFilename:= AppFile_Session;
-    if not SameFileName(sFilename, AFileName) then //fix issue #3744
-      DoOps_SaveSession(sFilename, false, false, false);
-    sFilename:= '';
+    if not SameFileName(ASessionId, AppFile_Session) then //fix issue #3744
+      DoOps_SaveSession(AppFile_Session, false, false, false);
   end;
 
   DoPyEvent_AppState(APPSTATE_SESSION_LOAD_BEGIN);
@@ -470,10 +477,10 @@ begin
     end;
 
     AppSessionIsLoading:= true;
-    DoOps_LoadHistory_GroupView(cfg); //reads to variables
+    DoOps_LoadHistory_GroupView(cfg, sRootPath); //reads to variables
     DoApplyInitialGroupSizes; //applies that variables
 
-    cfg.EnumSubKeys('/', list);
+    cfg.EnumSubKeys(sRootPath+'/', list);
     list.Sort;
 
     for i:= 0 to list.Count-1 do
@@ -481,7 +488,7 @@ begin
       //handle only sections like "000".."001"..etc, ignore sections like "panels", "gr"
       item_path:= list[i];
       if not IsHistorySectionForFilename(item_path) then Continue;
-      item_path:= '/'+item_path+'/';
+      item_path:= sRootPath+'/'+item_path+'/';
       item_path2:= item_path+'pair/';
 
       sFilename:= AppExpandHomeDirInFilename(cfg.GetValue(item_path+'file', ''));
@@ -492,12 +499,12 @@ begin
 
       if (sFilename<>'') and not bExist then
       begin
-        MsgLogConsole(Format(msgCannotFindSessionFile, [sFilename]));
+        MsgFileFromSessionNotFound(sFilename);
       end;
 
       if (sFilename2<>'') and not bExist2 then
       begin
-        MsgLogConsole(Format(msgCannotFindSessionFile, [sFilename2]));
+        MsgFileFromSessionNotFound(sFilename2);
         sFilename2:= '';
       end;
 
@@ -554,7 +561,7 @@ begin
           Frame:= DoFileOpen('', '', Pages, SOptionPassive+SOptionNoHistory);
         if sFilename<>'' then
         begin
-          Frame.FileName:= sFilename;
+          Frame.SetFileName(Frame.Ed1, sFilename);
           Frame.TabCaption:= ExtractFileName(sFilename);
         end;
         if sText<>'' then
@@ -587,7 +594,7 @@ begin
 
         //event on_open was blocked in DoFileOpen, call it here
         //(plugin "Tab Icons" needs it)
-        DoPyEvent(Frame.Ed1, cEventOnOpen, []);
+        DoPyEvent_Open(Frame.Ed1);
       end;
     end;
 
@@ -595,7 +602,7 @@ begin
     for i:= Low(TATGroupsNums) to High(TATGroupsNums) do
     begin
       CurTabs:= Groups.Pages[i].Tabs;
-      nIndex:= cfg.GetValue('/tab_index/g'+IntToStr(i), -1);
+      nIndex:= cfg.GetValue(sRootPath+'/tab_index/g'+IntToStr(i), -1);
       nIndex:= Max(0, Min(nIndex, CurTabs.TabCount-1));
       //don't check that index is different, force set index; this fixes e.g. bug #3892
       if CurTabs.TabCount>0 then
@@ -603,7 +610,7 @@ begin
     end;
 
     //restore group-index
-    nIndex:= cfg.GetValue('/tab_index/g_active', Low(TATGroupsNums));
+    nIndex:= cfg.GetValue(sRootPath+'/tab_index/g_active', Low(TATGroupsNums));
     if (nIndex>=Low(TATGroupsNums)) and (nIndex<=High(TATGroupsNums)) then
      if Groups.Pages[nIndex].Tabs.TabCount>0 then
       if Groups.PagesCurrent<>Groups.Pages[nIndex] then
@@ -627,21 +634,21 @@ begin
     //restore panel sizes
     if AllowShowPanels then
     begin
-      AppPanels[cPaneSide].Visible:= cfg.GetValue('/panels/side_show', AppPanels[cPaneSide].Visible);
-      AppPanels[cPaneOut].Visible:= cfg.GetValue('/panels/bottom_show', AppPanels[cPaneOut].Visible);
+      AppPanels[cPaneSide].Visible:= cfg.GetValue(sRootPath+'/panels/side_show', AppPanels[cPaneSide].Visible);
+      AppPanels[cPaneOut].Visible:= cfg.GetValue(sRootPath+'/panels/bottom_show', AppPanels[cPaneOut].Visible);
     end;
 
     with AppPanels[cPaneSide] do
-      PanelSize:= Min(cfg.GetValue('/panels/side_size', PanelSize), ClientWidth div 2);
+      PanelSize:= Min(cfg.GetValue(sRootPath+'/panels/side_size', PanelSize), ClientWidth div 2);
 
     with AppPanels[cPaneOut] do
-      PanelSize:= Min(cfg.GetValue('/panels/bottom_size', PanelSize), ClientHeight div 2);
+      PanelSize:= Min(cfg.GetValue(sRootPath+'/panels/bottom_size', PanelSize), ClientHeight div 2);
 
-    SText:= cfg.GetValue('/panels/side_panel', '');
+    SText:= cfg.GetValue(sRootPath+'/panels/side_panel', '');
     if AppPanels[cPaneSide].Visible and (SText<>'') then
       AppPanels[cPaneSide].UpdatePanels(SText, false, true);
 
-    SText:= cfg.GetValue('/panels/bottom_panel', '');
+    SText:= cfg.GetValue(sRootPath+'/panels/bottom_panel', '');
     if AppPanels[cPaneOut].Visible and (SText<>'') then
       AppPanels[cPaneOut].UpdatePanels(SText, false, true);
 
@@ -663,7 +670,7 @@ begin
 
   //don't wait until plugin sets session name in PROC_SET_SESSION,
   //it's needed in on_state
-  AppSessionName:= AFileName;
+  AppSessionName:= ASessionId;
 
   if (nCountFilesBefore>0) or (nCountFiles+nCountFilesModified>0) then
     DoPyEvent_AppState(APPSTATE_SESSION_LOAD)
@@ -676,22 +683,24 @@ begin
     DoOnTabFocusFinalization(Frame);
 
     //python 'on_caret' is disabled during session loading, so fire it here
-    Frame.Ed1.DoEventCarets;
+    Ed:= Frame.Ed1;
+    if not EditorIsEmpty(Ed) and not EditorCaretIsOnStart(Ed) then
+      Ed.DoEventCarets;
   end;
 end;
 
-procedure TfmMain.DoOps_LoadHistory_GroupView(cfg: TJsonConfig);
+procedure TfmMain.DoOps_LoadHistory_GroupView(cfg: TJsonConfig; const AJsonPath: string);
 var
   Sep: TATStringSeparator;
   i: integer;
 begin
-  FOption_GroupMode:= TATGroupsMode(cfg.GetValue('groups', Ord(gmOne)));
+  FOption_GroupMode:= TATGroupsMode(cfg.GetValue(AJsonPath+'/groups', Ord(gmOne)));
 
-  Sep.Init(cfg.GetValue('/gr/panel', ''));
+  Sep.Init(cfg.GetValue(AJsonPath+'/gr/panel', ''));
   Sep.GetItemInt(FOption_GroupPanelSize.x, 50);
   Sep.GetItemInt(FOption_GroupPanelSize.y, 50);
 
-  Sep.Init(cfg.GetValue('/gr/pages', ''));
+  Sep.Init(cfg.GetValue(AJsonPath+'/gr/pages', ''));
   for i in TATGroupsNums do
   begin
     Sep.GetItemInt(FOption_GroupSizes[i].x, 50);
@@ -699,14 +708,14 @@ begin
   end;
 end;
 
-procedure TfmMain.DoOps_SaveHistory_GroupView(cfg: TJsonConfig);
+procedure TfmMain.DoOps_SaveHistory_GroupView(cfg: TJsonConfig; const AJsonPath: string);
 var
   SizePanel: TPoint;
   SizePage: TATGroupsPoints;
   S: string;
   i: integer;
 begin
-  cfg.SetValue('groups', Ord(Groups.Mode));
+  cfg.SetValue(AJsonPath+'/groups', Ord(Groups.Mode));
 
   Groups.GetSizes(SizePanel, SizePage);
 
@@ -714,8 +723,8 @@ begin
   for i in TATGroupsNums do
     S+= Format('%d,%d,', [SizePage[i].x, SizePage[i].y]);
 
-  cfg.SetValue('/gr/panel', Format('%d,%d', [SizePanel.x, SizePanel.y]));
-  cfg.SetValue('/gr/pages', S);
+  cfg.SetValue(AJsonPath+'/gr/panel', Format('%d,%d', [SizePanel.x, SizePanel.y]));
+  cfg.SetValue(AJsonPath+'/gr/pages', S);
 end;
 
 
@@ -739,6 +748,7 @@ var
   cfg: TJSONConfig;
   bFlag: boolean;
   NTick: QWord;
+  sFilename, sRootPath: string;
 begin
   NTick:= GetTickCount64;
 
@@ -805,17 +815,10 @@ begin
     AppPanels[cPaneSide].Floating:= cfg.GetValue('float_side', false);
     AppPanels[cPaneOut].Floating:= cfg.GetValue('float_bottom', false);
 
-    //note: reading 'theme_ui', 'theme_syntax' from history is deprecated in 2019.09
-    //now it's read from user.json
     if UiOps.ThemeUi_Loaded then
-      ThemeUi:= UiOps.ThemeUi
-    else
-      ThemeUi:= cfg.GetValue('theme_ui', '');
-
+      ThemeUi:= UiOps.ThemeUi;
     if UiOps.ThemeSyntax_Loaded then
-      ThemeSyntax:= UiOps.ThemeSyntax
-    else
-      ThemeSyntax:= cfg.GetValue('theme_syntax', '');
+      ThemeSyntax:= UiOps.ThemeSyntax;
 
     UiOps.LangName:= cfg.GetValue('lang', '');
     if UiOps.LangName<>'' then
@@ -832,12 +835,13 @@ begin
       if not IsDefaultSessionActive then
       begin
         AppSessionName:= AppExpandFileNameWithDir(AppSessionName, AppDir_Settings);
-        if not FileExists(AppSessionName) then
+        SSplitByChar(AppSessionName, '|', sFilename, sRootPath);
+        if not FileExists(sFilename) then
           AppSessionName:= '';
       end;
 
       FLastSelectedCommand:= cfg.GetValue('last_cmd', FLastSelectedCommand);
-      DoOps_LoadHistory_GroupView(cfg);
+      DoOps_LoadHistory_GroupView(cfg, '');
     end;
 
     FOption_SidebarTab:= cfg.GetValue('tab_left', '');
@@ -921,11 +925,13 @@ end;
 procedure TfmMain.DoOps_LoadOptions_Global(cfg: TJSONConfig);
 const
   cCharEllipsis = $2026;
+  cHexShow: array[boolean] of byte = (uw_space, uw_hexshow);
 var
   Sep: TATStringSeparator;
   List: TStringList;
   s: string;
   N: integer;
+  bValue: boolean;
 begin
   Application.{%H-}MainFormOnTaskBar:= cfg.GetValue('ui_taskbar_mode'+cOptionSystemSuffix, Application.{%H-}MainFormOnTaskBar);
 
@@ -943,6 +949,7 @@ begin
   ATEditorOptions.MouseDragDropFocusesTargetEditor:= cfg.GetValue('mouse_drag_drop_focus_target', ATEditorOptions.MouseDragDropFocusesTargetEditor);
   ATEditorOptions.MaxTabPositionToExpand:= cfg.GetValue('tab_max_pos_expanded', ATEditorOptions.MaxTabPositionToExpand);
   ATEditorOptions.MaxLineLenForAccurateCharWidths:= cfg.GetValue('max_line_len_for_accurate_width', ATEditorOptions.MaxLineLenForAccurateCharWidths);
+  ATEditorOptions.MaxClipboardRecents:= cfg.GetValue('ui_max_history_clipboard', ATEditorOptions.MaxClipboardRecents);
 
   ATEditorOptions.UnprintedTabCharLength:= cfg.GetValue('unprinted_tab_len', ATEditorOptions.UnprintedTabCharLength);
   ATEditorOptions.UnprintedReplaceSpec:= cfg.GetValue('unprinted_replace_spec', ATEditorOptions.UnprintedReplaceSpec);
@@ -953,8 +960,8 @@ begin
   if s<>'' then
   begin
     Sep.Init(s);
-    Sep.GetItemInt(ATEditorOptions.UnprintedSpaceDotScale, ATEditorOptions.UnprintedSpaceDotScale, 5, 100);
-    Sep.GetItemInt(ATEditorOptions.UnprintedEndDotScale, ATEditorOptions.UnprintedEndDotScale, 5, 100);
+    Sep.GetItemInt(ATEditorOptions.UnprintedSpaceDotScale, ATEditorOptions.UnprintedSpaceDotScale, 1, 100);
+    Sep.GetItemInt(ATEditorOptions.UnprintedEndDotScale, ATEditorOptions.UnprintedEndDotScale, 1, 100);
     Sep.GetItemInt(ATEditorOptions.UnprintedEndFontScale, ATEditorOptions.UnprintedEndFontScale * 10 div 6, 5, 100);
     ATEditorOptions.UnprintedEndFontScale:= ATEditorOptions.UnprintedEndFontScale * 6 div 10;
     Sep.GetItemInt(ATEditorOptions.UnprintedTabPointerScale, ATEditorOptions.UnprintedTabPointerScale, 0, 100);
@@ -997,6 +1004,15 @@ begin
   ATEditorOptions.PreciseCalculationOfCharWidth:= Pos('w', s)=0;
   ATEditorOptions.TextoutNeedsOffsets:= Pos('o', s)>0;
   ATEditorOptions.CaretTextOverInvertedRect:= Pos('c', s)>0;
+
+  bValue:= Pos('s', s)=0;
+  FixedSizes[$1680]:= cHexShow[bValue];
+  FixedSizes[$2007]:= cHexShow[bValue];
+  FixedSizes[$200B]:= cHexShow[bValue];
+  FixedSizes[$202F]:= cHexShow[bValue];
+  FixedSizes[$205F]:= cHexShow[bValue];
+  FixedSizes[$2060]:= cHexShow[bValue];
+  FixedSizes[$3000]:= cHexShow[bValue];
 
   ATScrollbarTheme.DirectJumpOnClickPageUpDown:= cfg.GetValue('scrollbar_click_jump',
     ATScrollbarTheme.DirectJumpOnClickPageUpDown);
@@ -1363,7 +1379,10 @@ begin
   UiOps.FindIndentVert:= cfg.GetValue('find_indent_vert', UiOps.FindIndentVert);
   UiOps.FindIndentHorz:= cfg.GetValue('find_indent_horz', UiOps.FindIndentHorz);
   UiOps.FindMultiLineScale:= cfg.GetValue('find_multiline_scale', UiOps.FindMultiLineScale);
+  {$ifndef LCLGTK2}
+  //disabled on GTK2 until we solve issue #3990
   UiOps.FindSeparateForm:= cfg.GetValue('find_separate_form', UiOps.FindSeparateForm);
+  {$endif}
   UiOps.FindHiAll_MaxLines:= cfg.GetValue('find_hi_max_lines', UiOps.FindHiAll_MaxLines);
   //UiOps.FindHiAll_MoveCaret:= cfg.GetValue('find_hi_move_caret', UiOps.FindHiAll_MoveCaret);
 

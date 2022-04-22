@@ -51,7 +51,7 @@ uses
   ATPanelSimple,
   ATCanvasPrimitives,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Keymap,
   ATSynEdit_Keymap_Init,
   ATSynEdit_Commands,
@@ -84,6 +84,7 @@ uses
   ATStringProc_Separator,
   ATGauge,
   ATBinHex,
+  proc_inittick,
   proc_str,
   proc_py,
   proc_py_const,
@@ -239,6 +240,8 @@ type
   TfmMain = class(TForm)
     AppProps: TApplicationProperties;
     ButtonCancel: TATButton;
+    mnuEditPasteHist: TMenuItem;
+    mnuEditPasteIndent: TMenuItem;
     mnuViewSplitNo: TMenuItem;
     mnuViewSplitV: TMenuItem;
     mnuViewSplitH: TMenuItem;
@@ -394,7 +397,6 @@ type
     mnuEditLineOp: TMenuItem;
     mnuHelpCmd: TMenuItem;
     mnuEditUndo: TMenuItem;
-    mnuEditDel: TMenuItem;
     mnuSelAll: TMenuItem;
     SepEd2: TMenuItem;
     mnuEditRedo: TMenuItem;
@@ -722,14 +724,14 @@ type
     FOption_WindowPos: string;
     FOption_AllowSessionLoad: TAppAllowSomething;
     FOption_AllowSessionSave: TAppAllowSomething;
+    FOption_StartupCommand: string;
     FOption_GroupMode: TATGroupsMode;
     FOption_GroupSizes: TATGroupsPoints;
     FOption_GroupPanelSize: TPoint;
     FOption_SidebarTab: string;
     FCmdlineFileCount: integer;
 
-    procedure HandleTimerCommand(Ed: TATSynEdit; CmdCode: integer;
-      CmdInvoke: TATEditorCommandInvoke);
+    procedure HandleTimerCommand(Ed: TATSynEdit; CmdCode: integer; CmdInvoke: TATEditorCommandInvoke);
     function IsTooManyTabsOpened: boolean;
     function GetUntitledNumberedCaption: string;
     procedure PopupBottomOnPopup(Sender: TObject);
@@ -770,8 +772,7 @@ type
     procedure DoFindOptions_OnChange(Sender: TObject);
     procedure DoFindOptions_ApplyDict(const AText: string);
     function DoFindOptions_GetDict: PPyObject;
-    procedure DoFolderOpen(const ADirName: string; ANewProject: boolean;
-      AInvoke: TATEditorCommandInvoke);
+    procedure DoFolderOpen(const ADirName: string; ANewProject: boolean; AInvoke: TATEditorCommandInvoke);
     procedure DoFolderAdd(AInvoke: TATEditorCommandInvoke);
     procedure DoGetSaveDialog(var ASaveDlg: TSaveDialog);
     procedure DoGroupsChangeMode(Sender: TObject);
@@ -811,7 +812,6 @@ type
     procedure DoOnTabAdd(Sender: TObject);
     procedure DoOnTabClose(Sender: TObject; ATabIndex: Integer; var ACanClose, ACanContinue: boolean);
     procedure DoOnTabMove(Sender: TObject; NFrom, NTo: Integer);
-    //procedure DoOnTabOver(Sender: TObject; ATabIndex: Integer);
     procedure DoOnTabPopup(Sender: TObject; APages: TATPages; ATabIndex: integer);
     function DoOnTabGetTick(Sender: TObject; ATabObject: TObject): Int64;
     procedure DoCodetree_UpdateVersion(Ed: TATSynEdit);
@@ -826,12 +826,12 @@ type
     procedure DoCodetree_OnKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure DoCodetree_GotoBlockForCurrentNode(AndSelect: boolean);
     procedure DoCodetree_ApplyTreeHelperResults(Tree: TTreeView; Data: PPyObject);
-    function DoCodetree_ApplyTreeHelperInPascal(Ed: TATSynEdit; Tree: TTreeView;
-      const ALexer: string): boolean;
+    function DoCodetree_ApplyTreeHelperInPascal(Ed: TATSynEdit; Tree: TTreeView; const ALexer: string): boolean;
     procedure DoCodetree_OnAdvDrawItem(Sender: TCustomTreeView;
       Node: TTreeNode; State: TCustomDrawState; Stage: TCustomDrawStage;
       var PaintImages, DefaultDraw: Boolean);
     procedure DoSidebar_OnCloseFloatForm(Sender: TObject; var CloseAction: TCloseAction);
+    procedure DoSidebar_OnShowHide(Sender: TObject);
     function DoSidebar_GetFormTitle(const ACaption: string): string;
     procedure DoSidebar_OnPythonCall(const ACallback: string);
     procedure DoSidebar_OnShowCodeTree(Sender: TObject);
@@ -840,6 +840,7 @@ type
     procedure DoSidebar_MainMenuClick(Sender: TObject);
     procedure DoSidebar_FocusCodetreeFilter;
     procedure DoSidebar_FocusCodetree;
+    procedure DoBottom_OnShow(Sender: TObject);
     procedure DoBottom_OnHide(Sender: TObject);
     procedure DoBottom_OnCloseFloatForm(Sender: TObject; var CloseAction: TCloseAction);
     procedure DoBottom_FindClick(Sender: TObject);
@@ -847,8 +848,8 @@ type
     function DoAutoComplete_PosOnBadToken(Ed: TATSynEdit; AX, AY: integer): boolean;
     procedure DoAutoComplete(Ed: TATSynEdit);
     procedure DoAutoComplete_Delayed(Ed: TATSynEdit; AValue: boolean);
-    procedure DoPyCommand_Cudaxlib(Ed: TATSynEdit; const AMethod: string;
-      AInvoke: TATEditorCommandInvoke);
+    procedure DoPyCommand_CommandLineParam(const AModuleAndMethod: string);
+    procedure DoPyCommand_Cudaxlib(Ed: TATSynEdit; const AMethod: string; AInvoke: TATEditorCommandInvoke);
     procedure DoDialogCharMap;
     procedure DoFindActionFromString(const AStr: string);
     procedure DoGotoFromInput(const AInput: string);
@@ -965,14 +966,14 @@ type
     procedure DoOps_LoadLexerLib(AOnCreate: boolean);
     procedure DoOps_SaveHistory(ASaveModifiedTabs: boolean);
     procedure DoOps_ClearConfigHistory(AMode: TAppConfigHistoryElements);
-    procedure DoOps_SaveHistory_GroupView(cfg: TJsonConfig);
+    procedure DoOps_SaveHistory_GroupView(cfg: TJsonConfig; const AJsonPath: string);
     procedure DoOps_SaveOptionBool(const APath: string; AValue: boolean);
     procedure DoOps_SaveOptionString(const APath, AValue: string);
     procedure DoOps_SaveThemes;
     procedure DoOps_LoadHistory;
-    procedure DoOps_LoadHistory_GroupView(cfg: TJsonConfig);
-    function DoOps_SaveSession(const AFileName: string; ASaveModifiedFiles, ASaveUntitledTabs, AByTimer: boolean): boolean;
-    function DoOps_LoadSession(const AFileName: string; AllowShowPanels: boolean): boolean;
+    procedure DoOps_LoadHistory_GroupView(cfg: TJsonConfig; const AJsonPath: string);
+    function DoOps_SaveSession(const ASessionId: string; ASaveModifiedFiles, ASaveUntitledTabs, AByTimer: boolean): boolean;
+    function DoOps_LoadSession(const ASessionId: string; AllowShowPanels: boolean): boolean;
     procedure DoOps_SaveSessionsBackups(const ASessionFilename: string);
     procedure DoOps_LoadOptionsAndApplyAll;
     procedure DoOps_LoadOptionsLexerSpecific(F: TEditorFrame; Ed: TATSynEdit);
@@ -1017,6 +1018,7 @@ type
     procedure DoDialogFind(AReplaceMode: boolean);
     procedure DoDialogFind_Hide;
     procedure DoDialogFind_Toggle(AReplaceMode, AAndFocus: boolean);
+    procedure FinderFormChangeVisible(Sender: TObject);
     procedure FinderShowResult(ok: boolean; AFinder: TATEditorFinder);
     procedure FinderShowResultSimple(ok: boolean; AFinder: TATEditorFinder);
     procedure FinderShowMatchesCount(AMatchCount, ATime: integer);
@@ -1026,12 +1028,14 @@ type
     procedure DoFindMarkAll(AMode: TATFindMarkingMode);
     procedure DoMoveTabToGroup(AGroupIndex: Integer; AFromCommandPalette: boolean=false);
     function DoFileOpen(AFileName, AFileName2: string; APages: TATPages=nil; const AOptions: string=''): TEditorFrame;
-    procedure DoFileOpenDialog(AOptions: string= '');
+    procedure DoFileOpenDialog(const AOptions: string='');
     procedure DoFileOpenDialog_NoPlugins;
     function DoFileSaveAll: boolean;
     procedure DoFileReopen(Ed: TATSynEdit);
+    procedure DoFileReopenRecent;
     procedure DoLoadCommandLineBaseOptions(out AWindowPos: string;
       out AAllowSessionLoad, AAllowSessionSave: TAppAllowSomething;
+      out AStartupCommand: string;
       out AFileFolderCount: integer);
     procedure DoLoadCommandParams(const AParams: array of string; AOpenOptions: string);
     procedure DoLoadCommandLine;
@@ -1048,8 +1052,7 @@ type
     procedure DoToggleToolbar;
     procedure DoToggleStatusbar;
     procedure DoToggleUiTabs;
-    procedure FinderGetHiAllIndexes(AFinder: TATEditorFinder; out AIndex,
-      ACount: integer);
+    procedure FinderGetHiAllIndexes(AFinder: TATEditorFinder; out AIndex, ACount: integer);
     function FinderGetHiAllIndexesString(AFinder: TATEditorFinder): string;
     function FinderOptionsToHint(AFinder: TATEditorFinder): string;
     function FinderReplaceAll(Ed: TATSynEdit; AResetCaret: boolean): integer;
@@ -1071,8 +1074,7 @@ type
     function IsFocusedFind: boolean;
     procedure PyCompletionOnGetProp(Sender: TObject; AContent: TStringList; out ACharsLeft, ACharsRight: integer);
     procedure PyCompletionOnResult(Sender: TObject; const ASnippetId: string; ASnippetIndex: integer);
-    procedure DoPyCommand_ByPluginIndex(AIndex: integer;
-      AInvoke: TATEditorCommandInvoke);
+    procedure DoPyCommand_ByPluginIndex(AIndex: integer; AInvoke: TATEditorCommandInvoke);
     procedure SetFrameEncoding(Ed: TATSynEdit; const AEnc: string; AAlsoReloadFile: boolean);
     procedure SetFrameLexerByIndex(Ed: TATSynEdit; AIndex: integer);
     procedure SetShowStatus(AValue: boolean);
@@ -1081,7 +1083,8 @@ type
     procedure SetShowTabsMain(AValue: boolean);
     procedure SplitterOnPaintDummy(Sender: TObject);
     procedure StopAllTimers;
-
+    procedure UpdateEditorShowCaret;
+    procedure UpdateFindDialogParent;
     procedure UpdateFindDialogOnTabFocusing(F: TEditorFrame);
     procedure UpdateFindDialogEnabled(Frame: TEditorFrame);
     procedure UpdateGlobalProgressbar(AValue: integer; AVisible: boolean; AMaxValue: integer=100);
@@ -1105,6 +1108,7 @@ type
     procedure UpdateMenuChecks(F: TEditorFrame);
     procedure UpdateMenuEnc(AMenu: TMenuItem);
     procedure UpdateFrameLineEnds(Frame: TEditorFrame; AValue: TATLineEnds);
+    procedure UpdateEditorCaretLineEnds(Frame: TEditorFrame; Ed: TATSynEdit; AValue: TATLineEnds);
     procedure UpdateSomeStates(F: TEditorFrame);
     procedure UpdateStatusbarPanelsFromString(const AText: string);
     procedure UpdateStatusbarHints;
@@ -1191,8 +1195,9 @@ type
     procedure DoPyEvent_AppState(AState: integer);
     procedure DoPyEvent_EdState(Ed: TATSynEdit; AState: integer);
     procedure DoPyEvent_AppActivate(AEvent: TAppPyEvent);
-    procedure DoPyCommand(const AModule, AMethod: string; const AParams: TAppVariantArray;
-      AInvoke: TATEditorCommandInvoke);
+    procedure DoPyEvent_Open(Ed: TATSynEdit);
+    procedure DoPyEvent_OpenNone(Ed: TATSynEdit);
+    procedure DoPyCommand(const AModule, AMethod: string; const AParams: TAppVariantArray; AInvoke: TATEditorCommandInvoke);
     function RunTreeHelper(Frame: TEditorFrame; Tree: TTreeView): boolean;
     function DoPyLexerDetection(const Filename: string; Lexers: TStringList): integer;
     procedure FinderOnGetToken(Sender: TObject; AX, AY: integer; out AKind: TATTokenKind);
@@ -1206,9 +1211,6 @@ type
 
 var
   fmMain: TfmMain;
-
-var
-  NTickInitial: QWord = 0;
 
 var
   fmOutput: TAppFormWithEditor = nil;
@@ -1311,7 +1313,7 @@ begin
   {$ifdef unix}
   if Assigned(AppUniqInst) then exit;
   AppUniqInst:= TUniqueInstance.Create(nil);
-  AppUniqInst.Identifier:= AppServerId;
+  AppUniqInst.Identifier:= AppUserName+'_'+AppServerId; //added username to fix CudaText #4079
   AppUniqInst.OnOtherInstance:= @fmMain.UniqInstanceOtherInstance;
   {$endif}
 end;
@@ -2235,6 +2237,7 @@ end;
 procedure TfmMain.TimerAppIdleTimer(Sender: TObject);
 var
   S: UnicodeString;
+  STemp: string;
   Frame: TEditorFrame;
   NTick: QWord;
   NCnt, i: integer;
@@ -2245,6 +2248,13 @@ begin
   begin
     //debug
     exit;
+  end;
+
+  if FOption_StartupCommand<>'' then
+  begin
+    STemp:= FOption_StartupCommand;
+    FOption_StartupCommand:= '';
+    DoPyCommand_CommandLineParam(STemp);
   end;
 
   TimerMouseStop.Enabled:= TPluginHelper.EventIsUsed(cEventOnMouseStop);
@@ -2644,6 +2654,8 @@ begin
     OnCommand:= @DoSidebar_OnPythonCall;
     OnCloseFloatForm:= @DoSidebar_OnCloseFloatForm;
     OnGetTranslatedTitle:= @DoSidebar_GetFormTitle;
+    OnShow:= @DoSidebar_OnShowHide;
+    OnHide:= @DoSidebar_OnShowHide;
     Init(Self, alLeft);
     Splitter.OnPaint:= @SplitterOnPaintDummy;
   end;
@@ -2652,6 +2664,7 @@ begin
   begin
     PanelRoot:= Self.PanelAll;
     Toolbar:= ToolbarSideLow;
+    OnShow:= @DoBottom_OnShow;
     OnHide:= @DoBottom_OnHide;
     OnCommand:= @DoSidebar_OnPythonCall;
     OnCloseFloatForm:= @DoBottom_OnCloseFloatForm;
@@ -2666,8 +2679,8 @@ begin
   }
 
   EControlOptions.OnLexerParseProgress:= @DoOnLexerParseProgress;
-  CustomDialog_DoPyCallback:= @DoPyCallbackFromAPI;
-  CustomDialog_OnEditorCommand:= @FrameOnEditorCommand;
+  AppCustomDialog_DoPyCallback:= @DoPyCallbackFromAPI;
+  AppCustomDialog_OnEditorCommand:= @FrameOnEditorCommand;
 
   DoMenuitemEllipsis(mnuOpThemeUi);
   DoMenuitemEllipsis(mnuOpThemeSyntax);
@@ -2758,6 +2771,7 @@ begin
     FOption_WindowPos,
     FOption_AllowSessionLoad,
     FOption_AllowSessionSave,
+    FOption_StartupCommand,
     FCmdlineFileCount);
   DoOps_LoadOptions(AppFile_OptionsUser, EditorOps, true); //before LoadHistory
   DoFileOpen('', '', nil); //before LoadHistory
@@ -2860,6 +2874,16 @@ begin
     FLastAppActivate:= Tick;
     DoPyEvent(nil, AEvent, []);
   end;
+end;
+
+procedure TfmMain.DoPyEvent_Open(Ed: TATSynEdit);
+begin
+  DoPyEvent(Ed, cEventOnOpen, []);
+end;
+
+procedure TfmMain.DoPyEvent_OpenNone(Ed: TATSynEdit);
+begin
+  DoPyEvent(Ed, cEventOnOpenNone, []);
 end;
 
 procedure TfmMain.AppPropsActivate(Sender: TObject);
@@ -3273,7 +3297,7 @@ procedure TfmMain.FormShow(Sender: TObject);
     NTick:= GetTickCount64;
     MsgLogConsole(Format(
       'Startup: %dms, plugins: %s', [
-      (NTick-NTickInitial) div 10 * 10,
+      (NTick-AppTickInitial) div 10 * 10,
       AppPython.GetTimingReport
       ]));
 
@@ -3509,8 +3533,14 @@ begin
       F:= Frames[i];
       if not F.Modified then Continue;
       SCaption:= F.TabCaption;
-      if F.Filename<>'' then
-        SCaption+= '  ('+ExtractFileDir(F.Filename)+')';
+      if F.FileName<>'' then
+      begin
+        if F.EditorsLinked then
+          SCaption+= '  ('+AppCollapseHomeDirInFilename(ExtractFileDir(F.FileName))+')'
+        else
+          SCaption+= '  ('+AppCollapseHomeDirInFilename(ExtractFileDir(F.FileName))+' | '+
+                           AppCollapseHomeDirInFilename(ExtractFileDir(F.FileName2))+')'
+      end;
       Form.List.Items.AddObject(SCaption, F);
       Form.List.Checked[Form.List.Count-1]:= true;
     end;
@@ -3676,6 +3706,16 @@ begin
   end;
   UpdateStatusbar;
   MsgStatus(msgStatusEndsChanged);
+end;
+
+procedure TfmMain.UpdateEditorCaretLineEnds(Frame: TEditorFrame; Ed: TATSynEdit; AValue: TATLineEnds);
+begin
+  EditorChangeLineEndsForSelection(Ed, AValue);
+  if Assigned(Frame) then
+  begin
+    Frame.UpdateModified(Ed);
+    MsgStatus(msgStatusEndsChanged);
+  end;
 end;
 
 
@@ -4158,7 +4198,7 @@ begin
     AFileName:= AppExpandFileName(AFileName);
     if not FileExists(AFileName) then
     begin
-      MsgBox(msgCannotFindFile+#10+AFileName, MB_OK or MB_ICONERROR);
+      MsgBox(msgCannotFindFile+#10+AppCollapseHomeDirInFilename(AFileName), MB_OK or MB_ICONERROR);
       Exit
     end;
   end;
@@ -4168,7 +4208,7 @@ begin
     AFileName2:= AppExpandFileName(AFileName2);
     if not FileExists(AFileName2) then
     begin
-      MsgBox(msgCannotFindFile+#10+AFileName2, MB_OK or MB_ICONERROR);
+      MsgBox(msgCannotFindFile+#10+AppCollapseHomeDirInFilename(AFileName2), MB_OK or MB_ICONERROR);
       Exit
     end;
   end;
@@ -4206,7 +4246,7 @@ begin
       if not AppIsFileContentText(
                AFileName,
                UiOps.NonTextFilesBufferKb,
-               ATEditorOptions.DetectUf16BufferWords,
+               ATEditorOptions.DetectUTF16BufferWords,
                false) then
       begin
         if NonTextMode=cOpenModeNone then
@@ -4313,7 +4353,7 @@ begin
     DoFocusResult;
     if bEnableEventOpened then
     begin
-      DoPyEvent(Result.Ed1, cEventOnOpen, []);
+      DoPyEvent_Open(Result.Ed1);
     end;
 
     exit;
@@ -4344,22 +4384,24 @@ begin
       MsgStatusFileOpened(AFileName, AFileName2);
 
       if bEnableEventOpened then
-      begin
-        DoPyEvent(F.Ed1, cEventOnOpen, []);
-      end;
+        DoPyEvent_Open(F.Ed1);
 
-      if IsFilenameForLexerDetecter(AFileName) then
+      if bEnableEventOpenedNone and IsFilenameForLexerDetecter(AFileName) then
         if (F.FrameKind=efkEditor) and (F.LexerName[F.Ed1]='') then
         begin
-          if bEnableEventOpenedNone then
-            DoPyEvent(F.Ed1, cEventOnOpenNone, []);
+          DoPyEvent_OpenNone(F.Ed1);
           UpdateStatusbar;
         end;
 
       if AFileName2<>'' then
       begin
         if bEnableEventOpened then
-          DoPyEvent(F.Ed2, cEventOnOpen, []);
+          DoPyEvent_Open(F.Ed2);
+
+        if bEnableEventOpenedNone and IsFilenameForLexerDetecter(AFileName2) then
+          if (F.FrameKind=efkEditor) and (F.LexerName[F.Ed2]='') then
+            DoPyEvent_OpenNone(F.Ed2);
+
         UpdateStatusbar;
       end;
 
@@ -4390,16 +4432,16 @@ begin
   MsgStatusFileOpened(AFileName, AFileName2);
 
   if bEnableEventOpened then
-    DoPyEvent(F.Ed1, cEventOnOpen, []);
+    DoPyEvent_Open(F.Ed1);
 
   if bEnableEventOpenedNone then
     if IsFilenameForLexerDetecter(AFileName) then
       if (F.FrameKind=efkEditor) and (F.LexerName[F.Ed1]='') then
-        DoPyEvent(F.Ed1, cEventOnOpenNone, []);
+        DoPyEvent_OpenNone(F.Ed1);
 
   if bEnableEventOpened then
     if AFileName2<>'' then
-      DoPyEvent(F.Ed2, cEventOnOpen, []);
+      DoPyEvent_Open(F.Ed2);
 
   DoFocusResult;
 end;
@@ -4439,7 +4481,7 @@ begin
 end;
 
 
-procedure TfmMain.DoFileOpenDialog(AOptions: string='');
+procedure TfmMain.DoFileOpenDialog(const AOptions: string='');
 const
   //passive option used only for many files
   SOptionPassive = '/passive /nonear';
@@ -4761,6 +4803,24 @@ procedure TfmMain.DoDialogGotoBookmark;
 var
   ListItems: TStringList;
   //
+  function ShrinkLineIndentation(const S: string; ATabSize: integer): string;
+  var
+    N: integer;
+    SBegin, SEnd: string;
+  begin
+    N:= SGetIndentChars(S);
+    if N<2 then exit(S);
+    SBegin:= Copy(S, 1, N);
+    SEnd:= Copy(S, N+1, MaxInt);
+    SBegin:= StringReplace(SBegin, #9, StringOfChar(' ', ATabSize), [rfReplaceAll]);
+    if ATabSize>=4 then
+      N:= 4
+    else
+      N:= 2;
+    SetLength(SBegin, Length(SBegin) div N);
+    Result:= SBegin+SEnd;
+  end;
+  //
   function NiceBookmarkKind(NKind: integer): string;
   begin
     //paint prefix [N] for numbered bookmarks (kind=2..10)
@@ -4790,7 +4850,7 @@ var
       if not Ed.Strings.IsIndexValid(NLine) then Continue;
 
       SCaption:= Copy(Ed.Strings.Lines[NLine], 1, cMaxLen);
-      SCaption:= StringReplace(SCaption, #9, '  ', [rfReplaceAll]);
+      SCaption:= ShrinkLineIndentation(SCaption, Ed.OptTabSize);
 
       Prop:= TAppBookmarkProp.Create;
       Prop.Frame:= Frame;
@@ -4798,7 +4858,7 @@ var
       Prop.LineIndex:= NLine;
       Prop.MenuCaption:=
         SCaption+
-        #9+
+        #9'  '+
         Frame.TabCaption+': '+
         NiceBookmarkKind(Mark^.Data.Kind)+
         IntToStr(NLine+1);
@@ -5518,6 +5578,23 @@ begin
   end;
 end;
 
+procedure TfmMain.DoFileReopenRecent;
+var
+  fn: string;
+  i: integer;
+begin
+  for i:= 0 to AppListRecents.Count-1 do
+  begin
+    fn:= AppExpandHomeDirInFilename(AppListRecents[i]);
+    if FileExists(fn) then
+      if FindFrameOfFilename(fn)=nil then
+      begin
+        DoFileOpen(fn, '');
+        exit;
+      end;
+  end;
+end;
+
 procedure TfmMain.DoFileReopen(Ed: TATSynEdit);
 var
   F: TEditorFrame;
@@ -5640,7 +5717,7 @@ begin
     Ed.Modified:= false;
 
   if MsgBox(
-       msgConfirmCloseAndDeleteFile+#10+fn,
+       msgConfirmCloseAndDeleteFile+#10+AppCollapseHomeDirInFilename(fn),
        MB_OKCANCEL or MB_ICONWARNING)=ID_OK then
     if Groups.CloseTabs(tabCloseCurrent, false) then
     begin
@@ -5652,6 +5729,8 @@ begin
         DeleteFileUTF8(fnPic);
 
       MenuRecent_RemoveFilename(fn);
+
+      DoPyEvent(nil, cEventOnDeleteFile, [AppVariant(fn)]);
     end;
 end;
 
@@ -5681,7 +5760,7 @@ begin
     DoFileOpen(fn, '')
   else
   begin
-    MsgBox(msgCannotFindFile+#10+fn, MB_OK or MB_ICONERROR);
+    MsgBox(msgCannotFindFile+#10+AppCollapseHomeDirInFilename(fn), MB_OK or MB_ICONERROR);
     AppListRecents.Delete(n);
     UpdateMenuRecent(nil);
   end;
@@ -6236,7 +6315,8 @@ begin
     begin
       F.Editor.CommandLog.Add(cmd_PluginRun, cInvokeMenuAPI, SCallback+SCaption);
       DoPyCallbackFromAPI(SCallback, [], []);
-      F.Editor.CommandLog.Add(cmd_PluginEnd, cInvokeMenuAPI, SCallback+SCaption);
+      if not PyEditorMaybeDeleted then
+        F.Editor.CommandLog.Add(cmd_PluginEnd, cInvokeMenuAPI, SCallback+SCaption);
     end;
   end
   else
@@ -6450,11 +6530,17 @@ begin
 end;
 
 procedure TfmMain.mnuTreeSortedClick(Sender: TObject);
+var
+  Frame: TEditorFrame;
 begin
   if CodeTree.Tree.SortType=stNone then
     CodeTree.Tree.SortType:= stText
   else
     CodeTree.Tree.SortType:= stNone;
+
+  Frame:= TGroupsHelper.GetEditorFrame(AppCodetreeState.Editor);
+  if Assigned(Frame) then
+    Frame.CodetreeSortType:= CodeTree.Tree.SortType;
 end;
 
 procedure TfmMain.mnuTreeUnfoldAllClick(Sender: TObject);
@@ -7083,15 +7169,27 @@ begin
   UpdateMenuItemHotkey(mnuTextDelete, cCommand_TextDeleteSelection);
   UpdateMenuItemHotkey(mnuTextSel, cCommand_SelectAll);
   UpdateMenuItemHotkey(mnuTextGotoDef, cmd_GotoDefinition);
-  UpdateMenuItemHotkey(mnuTextOpenUrl, cmd_LinkAtPopup_Open);
+  UpdateMenuItemHotkey(mnuTextOpenUrl, cmd_LinkAtCaret_Open);
 
   Ed:= CurrentEditor;
-  if assigned(mnuTextCut) then mnuTextCut.Enabled:= not Ed.ModeReadOnly;
-  if assigned(mnuTextPaste) then mnuTextPaste.Enabled:= not Ed.ModeReadOnly and Clipboard.HasFormat(CF_Text);
-  if assigned(mnuTextDelete) then mnuTextDelete.Enabled:= not Ed.ModeReadOnly and Ed.Carets.IsSelection;
-  if assigned(mnuTextUndo) then mnuTextUndo.Enabled:= not Ed.ModeReadOnly and (Ed.UndoCount>0);
-  if assigned(mnuTextRedo) then mnuTextRedo.Enabled:= not Ed.ModeReadOnly and (Ed.RedoCount>0);
-  if assigned(mnuTextOpenUrl) then mnuTextOpenUrl.Enabled:= EditorGetLinkAtScreenCoord(Ed, PopupText.PopupPoint)<>'';
+
+  if Assigned(mnuTextCut) then
+    mnuTextCut.Enabled:= not Ed.ModeReadOnly;
+
+  if Assigned(mnuTextPaste) then
+    mnuTextPaste.Enabled:= not Ed.ModeReadOnly and Clipboard.HasFormat(CF_Text);
+
+  if Assigned(mnuTextDelete) then
+    mnuTextDelete.Enabled:= not Ed.ModeReadOnly and Ed.Carets.IsSelection;
+
+  if Assigned(mnuTextUndo) then
+    mnuTextUndo.Enabled:= not Ed.ModeReadOnly and (Ed.UndoCount>0);
+
+  if Assigned(mnuTextRedo) then
+    mnuTextRedo.Enabled:= not Ed.ModeReadOnly and (Ed.RedoCount>0);
+
+  if Assigned(mnuTextOpenUrl) then
+    mnuTextOpenUrl.Enabled:= EditorGetLinkAtCaret(Ed)<>'';
 end;
 
 
@@ -8509,6 +8607,42 @@ begin
 end;
 
 
+procedure TfmMain.mnuEditClick(Sender: TObject);
+var
+  Ed: TATSynEdit;
+  bSel: boolean;
+begin
+  Ed:= CurrentEditor;
+  if Ed=nil then exit;
+
+  bSel:= Ed.Carets.IsSelection;
+
+  if Assigned(mnuEditUndo) then
+    mnuEditUndo.Enabled:= not Ed.Strings.UndoEmpty;
+
+  if Assigned(mnuEditRedo) then
+    mnuEditRedo.Enabled:= not Ed.Strings.RedoEmpty;
+
+  if Assigned(mnuEditPaste) then
+  begin
+    mnuEditPaste.Enabled:= Clipboard.HasFormat(CF_Text);
+    if Assigned(mnuEditPasteIndent) then
+      mnuEditPasteIndent.Enabled:= mnuEditPaste.Enabled;
+    if Assigned(mnuEditPasteHist) then
+      mnuEditPasteHist.Enabled:= Assigned(ATEditorClipboardRecents) and (ATEditorClipboardRecents.Count>0);
+  end;
+
+  if Assigned(mnuEditCopy) then
+    mnuEditCopy.Enabled:= Ed.OptCopyLinesIfNoSel or bSel;
+
+  if Assigned(mnuEditCut) then
+    mnuEditCut.Enabled:= Ed.OptCutLinesIfNoSel or bSel;
+
+  if Assigned(mnuEditCopyAppend) then
+    mnuEditCopyAppend.Enabled:= bSel;
+end;
+
+
 //----------------------------
 {$I formmain_loadsave.inc}
 {$I formmain_updates_proc.inc}
@@ -8524,4 +8658,3 @@ end;
 
 
 end.
-

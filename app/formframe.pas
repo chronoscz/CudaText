@@ -20,7 +20,7 @@ uses
   ATGroups,
   ATScrollBar,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Finder,
   ATSynEdit_Keymap_Init,
   ATSynEdit_Adapters,
@@ -115,6 +115,7 @@ type
     Adapter1: TATAdapterEControl;
     Adapter2: TATAdapterEControl;
     PanelInfo: TPanel;
+    PanelNoHilite: TPanel;
     PanelReload: array[0..1] of TPanel;
     LabelReload: array[0..1] of TLabel;
     btnReloadYes: array[0..1] of TATButton;
@@ -133,6 +134,7 @@ type
     FActivationTime: Int64;
     FCodetreeFilter: string;
     FCodetreeFilterHistory: TStringList;
+    FCodetreeSortType: TSortType;
     FEnabledCodeTree: array[0..1] of boolean;
     FNotifEnabled: boolean;
     FOnCallAutoCompletion: TEditorBooleanEvent;
@@ -254,9 +256,11 @@ type
     function GetUnprintedSpaces: boolean;
     procedure InitEditor(var ed: TATSynEdit; const AName: string);
     procedure InitPanelReload(Index: integer);
-    procedure InitPanelInfo(const AText: string; AOnClick: TNotifyEvent);
+    procedure InitPanelInfo(var APanel: TPanel; const AText: string;
+      AOnClick: TNotifyEvent; ARequirePython: boolean);
     procedure PaintMicromap(Ed: TATSynEdit; ACanvas: TCanvas; const ARect: TRect);
     procedure PanelInfoClick(Sender: TObject);
+    procedure PanelNoHiliteClick(Sender: TObject);
     procedure SetBracketHilite(AValue: boolean);
     procedure SetEnabledCodeTree(Ed: TATSynEdit; AValue: boolean);
     procedure SetEnabledFolding(AValue: boolean);
@@ -347,7 +351,7 @@ type
     property NotifEnabled: boolean read FNotifEnabled write FNotifEnabled;
     procedure NotifyAboutChange(Ed: TATSynEdit);
 
-    property FileName: string read FFileName write SetFileName;
+    property FileName: string read FFileName;
     property FileName2: string read FFileName2;
     property LexerChooseFunc: TecLexerChooseFunc read FLexerChooseFunc write FLexerChooseFunc;
     function GetFileName(Ed: TATSynEdit): string;
@@ -374,6 +378,7 @@ type
     property EnabledCodeTree[Ed: TATSynEdit]: boolean read GetEnabledCodeTree write SetEnabledCodeTree;
     property CodetreeFilter: string read FCodetreeFilter write FCodetreeFilter;
     property CodetreeFilterHistory: TStringList read FCodetreeFilterHistory;
+    property CodetreeSortType: TSortType read FCodetreeSortType write FCodetreeSortType;
     property ActivationTime: Int64 read FActivationTime write FActivationTime;
     function IsEmpty: boolean;
     procedure ApplyTheme;
@@ -441,7 +446,6 @@ type
     procedure DoHideNotificationPanel(Index: integer);
     //macro
     procedure DoMacroStartOrStop;
-    procedure DoMacroStop(ACancel: boolean);
     property MacroRecord: boolean read FMacroRecord;
 
     //events
@@ -918,6 +922,8 @@ begin
     NColor:= clNone;
     bFoundBrackets:= false;
 
+    if (i>1) and (AStr[i-1]='&') then Continue; //skip HTML tokens like &#123; and &nnnn;
+
     case AStr[i] of
       '#':
         begin
@@ -1085,6 +1091,7 @@ begin
     end;
 
     D.TabHint:= SHint;
+    Pages.Tabs.UpdateTabTooltip;
   end;
 end;
 
@@ -1513,7 +1520,8 @@ begin
     cCommand_ClipboardPaste_Select,
     cCommand_ClipboardPaste_KeepCaret,
     cCommand_ClipboardPaste_Column,
-    cCommand_ClipboardPaste_ColumnKeepCaret:
+    cCommand_ClipboardPaste_ColumnKeepCaret,
+    cCommand_ClipboardPasteAndIndent:
       begin
         Adapter[Ed].StopTreeUpdate;
         Adapter[Ed].Stop;
@@ -1828,6 +1836,7 @@ begin
   FSaveHistory:= true;
   FEditorsLinked:= true;
   FCodetreeFilterHistory:= TStringList.Create;
+  FCodetreeSortType:= stNone;
   FCachedTreeview[0]:= nil;
   FCachedTreeview[1]:= nil;
 
@@ -2010,6 +2019,9 @@ begin
 
   if Assigned(PanelInfo) then
     ApplyThemeToInfoPanel(PanelInfo);
+
+  if Assigned(PanelNoHilite) then
+    ApplyThemeToInfoPanel(PanelNoHilite);
 end;
 
 function TEditorFrame.IsEditorFocused: boolean;
@@ -2261,6 +2273,8 @@ end;
 procedure TEditorFrame.DoFileOpen(const AFileName, AFileName2: string;
   AAllowLoadHistory, AAllowLoadBookmarks, AAllowLexerDetect, AAllowErrorMsgBox, AAllowLoadUndo: boolean;
   AOpenMode: TAppOpenMode);
+var
+  bFilename2Valid: boolean;
 begin
   NotifEnabled:= false; //for binary-viewer and pictures, NotifEnabled must be False
   FileProps.Inited:= false; //loading of new filename must not trigger notif-thread
@@ -2277,7 +2291,7 @@ begin
   if UiOps.InfoAboutOptionsEditor then
     if (CompareFilenames(AFileName, AppFile_OptionsUser)=0) or
       (CompareFilenames(AFileName, AppFile_OptionsDefault)=0) then
-      InitPanelInfo(msgSuggestOptionsEditor, @PanelInfoClick);
+      InitPanelInfo(PanelInfo, msgSuggestOptionsEditor, @PanelInfoClick, true);
 
   Lexer[Ed1]:= nil;
   if not EditorsLinked then
@@ -2320,6 +2334,10 @@ begin
   DoDeactivatePictureMode;
   DoDeactivateViewerMode;
 
+  bFilename2Valid:= (AFileName2<>'') and not SameFileName(AFileName, AFileName2);
+  if bFilename2Valid then
+    EditorsLinked:= false; //set it before opening 1st file
+
   DoFileOpen_Ex(Ed1, AFileName,
     AAllowLoadHistory,
     AAllowLoadHistory,
@@ -2330,9 +2348,8 @@ begin
     AAllowLoadUndo,
     AOpenMode);
 
-  if AFileName2<>'' then
+  if bFilename2Valid then
   begin
-    EditorsLinked:= false;
     SplitHorz:= false;
     Splitted:= true;
     DoFileOpen_Ex(Ed2, AFileName2,
@@ -2445,7 +2462,14 @@ end;
 
 procedure TEditorFrame.SetFileName(Ed: TATSynEdit; const AFileName: string);
 begin
-  Ed.FileName:= AFileName;
+  if EditorsLinked then
+  begin
+    Ed1.FileName:= AFileName;
+    Ed2.FileName:= AFileName;
+  end
+  else
+    Ed.FileName:= AFileName;
+
   if EditorsLinked or (Ed=Ed1) then
     FFileName:= AFileName
   else
@@ -2813,7 +2837,7 @@ begin
     AppVariant(ABand)
     ]).Val = evrFalse then exit;
 
-  if ABand=Ed.GutterBandBookmarks then
+  if ABand=Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks) then
     ed.BookmarkToggleForLine(ALine, 1, '', bmadOption, true, 0);
 end;
 
@@ -2835,12 +2859,16 @@ begin
   kind:= Ed.Strings.Bookmarks[index]^.Data.Kind;
   if kind<=1 then
   begin
-    c.brush.color:= GetAppColor(apclEdBookmarkIcon);
-    c.pen.color:= c.brush.color;
-    inc(r.top, 1);
-    inc(r.left, 4);
+    c.Brush.Color:= GetAppColor(apclEdBookmarkIcon);
+    c.Pen.Color:= c.Brush.Color;
+    inc(r.Top, 1);
+    inc(r.Left, 4);
     dx:= r.Height div 2-1;
-    c.Polygon([Point(r.left, r.top), Point(r.left+dx, r.top+dx), Point(r.left, r.top+2*dx)]);
+    c.Polygon([
+      Point(r.Left, r.Top),
+      Point(r.Left+dx, r.Top+dx),
+      Point(r.Left, r.Top+2*dx)
+      ]);
   end
   else
   if (kind>=Low(AppBookmarkSetup)) and (kind<=High(AppBookmarkSetup)) then
@@ -2924,21 +2952,6 @@ begin
   Ed1.Update;
   Ed2.ModeMacroRecording:= FMacroRecord;
   Ed2.Update;
-end;
-
-procedure TEditorFrame.DoMacroStop(ACancel: boolean);
-begin
-  FMacroRecord:= false;
-
-  Ed1.ModeMacroRecording:= FMacroRecord;
-  Ed1.Update;
-  Ed2.ModeMacroRecording:= FMacroRecord;
-  Ed2.Update;
-
-  if ACancel then
-    MacroStrings.Clear
-  else
-    DoPyEvent_Macro(MacroStrings.Text);
 end;
 
 procedure TEditorFrame.DoOnUpdateStatusbar;
@@ -3338,21 +3351,21 @@ begin
 
   if UiOps.HistoryItems[ahhUnprinted] then
   begin
-    c.SetDeleteValue(path+cHistory_Unpri, Ord(Ed.OptUnprintedVisible), Ord(EditorOps.OpUnprintedShow));
+    c.SetDeleteValue(path+cHistory_Unpri,        Ord(Ed.OptUnprintedVisible),     Ord(EditorOps.OpUnprintedShow));
     c.SetDeleteValue(path+cHistory_Unpri_Spaces, Ord(Ed.OptUnprintedSpaces),      Ord(Pos('s', EditorOps.OpUnprintedContent)>0));
-    c.SetDeleteValue(path+cHistory_Unpri_Ends, Ord(Ed.OptUnprintedEnds),          Ord(Pos('e', EditorOps.OpUnprintedContent)>0));
+    c.SetDeleteValue(path+cHistory_Unpri_Ends,   Ord(Ed.OptUnprintedEnds),        Ord(Pos('e', EditorOps.OpUnprintedContent)>0));
     c.SetDeleteValue(path+cHistory_Unpri_Detail, Ord(Ed.OptUnprintedEndsDetails), Ord(Pos('d', EditorOps.OpUnprintedContent)>0));
   end;
 
   if UiOps.HistoryItems[ahhLineNumbers] then
-    c.SetDeleteValue(path+cHistory_LineNums, Ord(Ed.Gutter[Ed.GutterBandNumbers].Visible), 1);
+    c.SetDeleteValue(path+cHistory_LineNums, Ord(Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers)].Visible), 1);
 
   if UiOps.HistoryItems[ahhScale] then
     c.SetDeleteValue(path+cHistory_FontScale, Ed.OptScaleFont, 0);
 
   if UiOps.HistoryItems[ahhFolding] then
   begin
-    c.SetDeleteValue(path+cHistory_FoldingShow, Ord(Ed.Gutter[Ed.GutterBandFolding].Visible), 1);
+    c.SetDeleteValue(path+cHistory_FoldingShow, Ord(Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding)].Visible), 1);
     c.SetDeleteValue(path+cHistory_FoldedRanges, Ed.FoldingAsString, '');
   end;
 
@@ -3605,24 +3618,18 @@ begin
     Ed.IsModifiedUnprintedEndDetails:= true;
   end;
 
-  with Ed.Gutter[Ed.GutterBandNumbers] do
+  NFlag:= c.GetValue(path+cHistory_LineNums, -1);
+  if NFlag>=0 then
   begin
-    NFlag:= c.GetValue(path+cHistory_LineNums, -1);
-    if NFlag>=0 then
-    begin
-      Visible:= NFlag=1;
-      Ed.IsModifiedGutterNumbersVisible:= true;
-    end;
+    Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers)].Visible:= NFlag=1;
+    Ed.IsModifiedGutterNumbersVisible:= true;
   end;
 
-  with Ed.Gutter[Ed.GutterBandFolding] do
+  NFlag:= c.GetValue(path+cHistory_FoldingShow, -1);
+  if NFlag>=0 then
   begin
-    NFlag:= c.GetValue(path+cHistory_FoldingShow, -1);
-    if NFlag>=0 then
-    begin
-      Visible:= NFlag=1;
-      Ed.IsModifiedGutterFoldingVisible:= true;
-    end;
+    Ed.Gutter[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding)].Visible:= NFlag=1;
+    Ed.IsModifiedGutterFoldingVisible:= true;
   end;
 
   Ed.OptScaleFont:= c.GetValue(path+cHistory_FontScale, 0);
@@ -3804,27 +3811,29 @@ begin
     end;
 end;
 
-procedure TEditorFrame.InitPanelInfo(const AText: string; AOnClick: TNotifyEvent);
+procedure TEditorFrame.InitPanelInfo(var APanel: TPanel; const AText: string; AOnClick: TNotifyEvent; ARequirePython: boolean);
 begin
-  if not AppPython.Inited then exit;
+  if ARequirePython then
+    if not AppPython.Inited then exit;
 
-  if not Assigned(PanelInfo) then
+  if not Assigned(APanel) then
   begin
-    PanelInfo:= TPanel.Create(Self);
-    PanelInfo.Parent:= Self;
-    PanelInfo.Align:= alTop;
-    PanelInfo.Visible:= false;
-    PanelInfo.Height:= ATEditorScale(26);
-    PanelInfo.BevelOuter:= bvNone;
+    APanel:= TPanel.Create(Self);
+    APanel.Parent:= Self;
+    APanel.Align:= alTop;
+    APanel.Visible:= false;
+    APanel.Height:= ATEditorScale(26);
+    APanel.BevelOuter:= bvNone;
   end;
 
-  ApplyThemeToInfoPanel(PanelInfo);
+  ApplyThemeToInfoPanel(APanel);
 
-  PanelInfo.Caption:= AText;
-  PanelInfo.OnClick:= AOnClick;
+  APanel.Caption:= AText;
+  APanel.OnClick:= AOnClick;
 
-  PanelInfo.Show;
+  APanel.Show;
 end;
+
 
 procedure TEditorFrame.InitPanelReload(Index: integer);
 var
@@ -3974,14 +3983,39 @@ var
   TempLexer: TecSyntAnalyzer;
   TempLexerLite: TATLiteLexer;
   SName: string;
+  bTooBigForLexer: boolean;
 begin
   if AFileName='' then exit;
-  Lexer_DetectByFilename(AFileName, TempLexer, TempLexerLite, SName, FLexerChooseFunc);
+  Lexer_DetectByFilename(
+    AFileName,
+    TempLexer,
+    TempLexerLite,
+    SName,
+    bTooBigForLexer,
+    FLexerChooseFunc
+    );
+
   if Assigned(TempLexer) then
     Lexer[Ed]:= TempLexer
   else
   if Assigned(TempLexerLite) then
     LexerLite[Ed]:= TempLexerLite;
+
+  if bTooBigForLexer and (TempLexer=nil) and (TempLexerLite=nil) then
+  begin
+    TempLexer:= AppManager.FindLexerByFilename(AFileName, nil);
+    if Assigned(TempLexer) then
+      InitPanelInfo(
+        PanelNoHilite,
+        Format(msgStatusLexerDisabledBySize, [
+            UiOps.MaxFileSizeForLexer,
+            TempLexer.LexerName,
+            FileSize(AFileName) div (1024*1024)
+            ]),
+        @PanelNoHiliteClick,
+        false
+        );
+  end;
 end;
 
 procedure TEditorFrame.SetFocus;
@@ -4294,8 +4328,15 @@ end;
 
 procedure TEditorFrame.PanelInfoClick(Sender: TObject);
 begin
-  PanelInfo.Hide;
+  if Assigned(PanelInfo) then
+    PanelInfo.Hide;
   AppPython.RunCommand('cuda_prefs', 'dlg_cuda_options', []);
+end;
+
+procedure TEditorFrame.PanelNoHiliteClick(Sender: TObject);
+begin
+  if Assigned(PanelNoHilite) then
+    PanelNoHilite.Hide;
 end;
 
 procedure TEditorFrame.CancelAutocompleteAutoshow(Ed: TATSynEdit);

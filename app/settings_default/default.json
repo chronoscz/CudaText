@@ -56,8 +56,9 @@
   "font_size_bi__linux": 10,
   "font_size_bi__mac": 10,
 
-  //Enable to render font ligatures, e.g. with font "Fira Code".
-  //Option has effect only on Windows. On Unix: on, or depends on OS.
+  //Enable to render font ligatures, e.g. with the font "Fira Code".
+  //Option has effect only on Windows.
+  //On other OS'es: ligatures are on (it depends on widget set, e.g. GTK2/Qt5).
   "font_ligatures": true,
 
   //Text font rendering quality. [has suffix]
@@ -123,10 +124,13 @@
   //                   On Qt5, 'w' gives various results, it depends on Desktop Environment.
   //  if 'o' in value: Calculate 'offsets' for individual characters, ie use slower API to render.
   //                   On Windows, 'offsets' don't decrease rendering speed.
-  //                   On macOS, 'offsets' decrease (2x) renderind speed.
+  //                   On macOS, 'offsets' decrease (2x) rendering speed.
   //                   On GTK2 and Qt5, 'offsets' decrease rendering speed.
   //  if 'c' in value: On painting caret, additionally render the text over inverted caret's cell.
   //  if 'e' in value: Ellipsis-char U+2026 has width 100%, otherwise the width from "unicode_full_width".
+  //  if 's' in value: Show Unicode-spaces as usual spaces.
+  //                   If 's' not in value, show Unicode-spaces in hex form.
+  //                   Unicode-spaces are: U+1680, U+2007, U+200B, U+202F, U+205F, U+2060, U+3000.
   //Note: this option is global, not per-lexer.
   "renderer_tweaks": "wo",
   "renderer_tweaks__linux": "w",
@@ -868,6 +872,11 @@
   //History: Max items in "settings/history files.json" (0..400).
   "ui_max_history_files": 25,
 
+  //History: Max saved clipboard items for the command "Edit / Paste from history".
+  //If 0: no clipboard history will be kept.
+  //If big value: all items of "Paste from history" may not fit to screen.
+  "ui_max_history_clipboard": 15,
+
   //History: Which elements to save to history/session files.
   //Option affects only saving the history, and is ignored on reading it.
   //Value is string, each char _disables_ storing of one element.
@@ -1003,9 +1012,9 @@
 
   //Middle-click action.
   //  0: None
-  //  1: Scrolling: shows circle picture, then mouse-move near that circle does auto-scrolling
-  //  2: Paste (without caret placement)
-  //  3: Goto-definition command
+  //  1: Scrolling: show the "circle" picture, then mouse moving near that picture runs auto-scrolling
+  //  2: Paste, at clicked position
+  //  3: Run "Go to definition" command
   "mouse_middle_click": 1,
 
   //Enable selection of vertical blocks (Alt+drag).
@@ -1196,7 +1205,7 @@
   //b) "ui_reopen_session":true,
   //c) "ui_history_disabled" does not have "t",
   //program will save modified documents to the session, on closing, without confirmation.
-  "ui_auto_save_session": false,
+  "ui_auto_save_session": true,
 
   //If value N>0, app creates N backups of session files on closing: 'history session.X.cuda-session'.
   //You can open these backups by plugin Session Manager, or rename them to a normal name.
@@ -1343,9 +1352,9 @@
   //Auto-pair some chars on typing.
   //Value must have some of supported chars without spaces:
   //  ( [ { < ' " ` ~ * #
-  //(Don't forget that JSON config needs double-quote escaped.)
-  //Feature doesn't work on backslash-escaped chars.
-  //Feature doesn't work if after caret is a word char.
+  //(Don't forget that JSON file needs "-char in escaped form.)
+  //Auto-pairing doesn't work on backslash-escaped chars.
+  //Auto-pairing doesn't work if after caret is a word char.
   "auto_close_brackets": "([{",
 
   //If value>1, option allows N consecutive commented lines to automatically create the folding range.
@@ -1423,6 +1432,7 @@
   "ui_menu_themed": true,
 
   //Font size for themed top menu bar (Windows only).
+  //Note: too big value is not supported: font will overlap menuitem area.
   "ui_menu_themed_font_size": 9,
 
   //Side-panel's visible state on program start.

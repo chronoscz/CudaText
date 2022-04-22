@@ -228,8 +228,11 @@ object fmMain: TfmMain
       object mnuEditPaste: TMenuItem
         Caption = '&Paste'
       end
-      object mnuEditDel: TMenuItem
-        Caption = '&Delete'
+      object mnuEditPasteIndent: TMenuItem
+        Caption = 'Paste and indent'
+      end
+      object mnuEditPasteHist: TMenuItem
+        Caption = 'Paste from history'
       end
       object SepEd2: TMenuItem
         Caption = '-'

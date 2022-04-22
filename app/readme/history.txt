@@ -3,9 +3,121 @@
   - fixed
   * changed
 
+1.162.5 (2022/04)
 
-1.156.1 (2022/02)
++ add: on editing of a line, which is start of a folded block, do unfolding of that block (thanks @veksha)
++ add: plugin Comments: support 'Line comment' commands if 'line comment' chars are absent, but 'range comment' chars are present; e.g. in CSS (thanks @ildarkhasanshin)
++ add: plugin Insert Time: added format 'unix' (Unix-time), it will be added to config after you delete the config + restart the app (thanks @mix-7)
+- fix: issue with "ui_one_instance":true on a multi-user Linux/Unix system (thanks @bogen85)
+- fix: issue with too greedy folding with "auto_fold_comments" in Nim lexer (thanks @veksha)
 
+1.162.0 (2022/04)
+
++ add: Project Manager: the work is done to support auto-saving of the last project (even untitled), and auto-loading of last active project on app start. So if user e.g. drag-drops a folder on CudaText, this makes the new project "temporary", and after app restart, "temporary" project will be restored. Also app option "ui_auto_save_session" defaults to 'true' now, to be like Sublime Text / VSCode. (thanks opennet.ru)
++ add: detection of XML codepage must handle standard codepage names like "windows-1252" (thanks @dinkumoil)
++ add: 'Paste and indent' must overwrite the selection (thanks @veksha)
++ add: viewer allows to activate UTF-8 encoding, and also ISO-8859-9 encoding (thanks opennet.ru)
++ add: code-tree remembers 'Sorted' state per each file-tab (thanks @randomize from opennet.ru)
++ add: commands "fold/unfold/toggle block at current line" support multi-carets
++ add: lexer XML: more highlighting when folding is auto-disabled by "lexer_folding_max_lines" (thanks @ertank)
++ add: lexer XML: highlight numbers too
+* change: paste with middle-click (option "mouse_middle_click":2): place caret to clicked position, like VSCode/Kate (thanks opennet.ru)
+* change: rename menu item "Addons Manager / Install from GitHub" to "Install from Git"
+* change: for folded blocks, horizontal line has different style, dash/dash
+- fix: regression in 1.160.2: flickering on editing in file ending, if file was edited in the beginning
+- fix: Project Manager: bug with the prompt "files not belonging to the project"
+- fix: problem with saving modified files that were reloaded by "ui_auto_save_session":true (thanks @thatfuckingbird)
+
+1.161.0 (2022/04)
+
++ add: show information-panel on the top, when option "ui_max_size_lexer" disables the normal lexer
++ add: detect encoding in XML files by signature like <?xml encoding="ISO-8859-9"?> (thanks @ertank)
++ add: Command Palette and API menus 'fuzzy search' improved: first show items with plain matches, then show items with fuzzy-only matches; similar to Sublime Text (thanks @adoeller)
++ add: Addon Manager: enabled 'fuzzy search' in menus
+
+1.160.2 (2022/04)
+
++ add: dialog Find/Replace now shows inside the floating-groups too, when activated from there
++ add: command-line parameter -c=cuda_module_name,method_name (thanks @jczanfona)
++ add: faster filling of the code-tree (on 3Mb XML file: 2 seconds instead of 14 seconds)
+- fix: regression in syntax highlight after "Comment stream block" (thanks @ildarkhasanshin)
+- fix: Windows: painting of themed menu, when "ui_menu_themed_font_size" value is big (thanks @Ambassador)
+
+1.160.0 (2022/04)
+
++ add: mouse buttons Extra1/Extra2 are supported in the hotkey input dialog; note that you must press buttons while mouse pointer is over editor control; these mouse buttons work as equavalent to keyboard buttons BrowserBack/BrowserForward
++ add: improved keyboard 'accelerators' in the menu 'File / Open recent'
++ add: improved API to open a file-pair: app now suggests to install new lexer also for the 2nd file
++ add: improved API to show 'decorations on gutter'
++ add: more stability of the multi-threaded parser (before, file ~/cudatext.error could appear, please report if that file appears again with new info)
++ add: the minimal size of "unprinted spaces/ line ends" dots changed from 2 px to 1 px (thanks @ildarkhasanshin)
++ add: lexer PHP: folding of 'case' blocks (thanks @ildarkhasanshin)
+* change: lexer PHP: simpler highlight HereDoc blocks
+- fix: "Open URL" in context menu was disabled if menu is called by ContextMenu key (thanks @ildarkhasanshin)
+
+1.159.0 (2022/03)
+
++ add: Project Manager: added 'project sessions' - sessions which belong to the current project and are embedded into project file *.cuda-proj. Added several menu items to the 'gear' menu in the ProjManager, to work with 'project sessions'. (thanks @GHNewbiee)
++ add: Project Manager removes the file, on doing "File / Close and delete file" (thanks @MiroslavMatas)
++ add: Project Manager hides deleted files/folders, on opening project (thanks @MiroslavMatas)
++ add: 4 commands in the Command Palette: "change line ends to LF / CR LF / CR / default, for lines(s) with caret" (thanks @myocytebd)
++ add: lexer PHP: add folding for () and [] (thanks @ildarkhasanshin)
+* change: dialog 'Go to bookmark' shows decreased indentations of lines (thanks @ildarkhasanshin)
+- fix: new feature (v1.157) "Paste from history" didn't work on Windows
+
+1.158.2 (2022/03)
+
++ add: default config of "detect_line" option (see the Wiki) includes 'shebang' for Bash and Python (thanks @HugLifeTiZ)
+- fix: write JSON configs (main app + Options Editor Lite) with 'flush buffers', to not wipe them by OS hard reset (thanks @DUOLabs333)
+- fix: too slow RegEx for 'numbers' in lexers C, C++, CSS, Lua, Python
+* change: disabled highlight of Git merge conflict markers: <<<<<<< ======= >>>>>>>
+
+1.158.0 (2022/03)
+
++ add: Project Manager: after "Refresh" action, restore tree-nodes folding + re-select old selected item (thanks @GHNewbiee)
++ add: Emmet plugin: support more abbreviations with Lorem Ipsum: "lorem", "lorem4", "lorem*4", "p*4>lorem" (thanks Rickard)
++ add: lexer Python: folding for {...} and [...] blocks
++ add: update data-files for CSS auto-completion
+- fix: option "find_separate_form" is disabled on GTK2, since that platform has a bug with it
+- fix: Addon Manager: CudaText update checker
+
+1.157.5 (2022/03)
+
++ add: lexer CSS: code-tree is reworked, now it can show OK even huge _minified_ CSS files
++ add: command "Paste and indent" in the Command Palette + upper menu (thanks @DUOLabs333). It mimics Sublime Text command with the same name, you can assign Ctrl+Shift+V to it.
++ add: command "Paste from history" in the Command Palette + upper menu. It mimics Sublime Text command. Feature is controlled by new option "ui_max_history_clipboard".
++ add: command "clipboard: clear history" in the Command Palette
+* change: removed menu item "Edit / Delete" (most apps don't have it)
+* change: lexer CSS: removed 'properties' nodes from code-tree (like in VSCode)
+* change: lexer CSS: removed color names (e.g. 'olive') from code-tree
+
+1.157.0 (2022/03)
+
++ add: support encoding ISO-8859-9 (thanks @ertank)
++ add: command 'tabulation-key uses spaces: turn on'
++ add: command 'tabulation-key uses spaces: turn off'
++ add: command 'tabulation size: set to 2'
++ add: command 'tabulation size: set to 4'
++ add: command 'tabulation size: set to 8'
+* change: prettified ISO encoding names: 'iso88591' -> 'iso-8859-1' etc
+* change/add: better Undo steps, when Del/BkSpace key was pressed many times (thanks @cser)
+* change: plugin Insert Time: move caret to the right side on insertion (thanks @mix-7)
+* change: delete deprecated (in 2021/10) commands 'stop macro' and 'cancel macro'
+* change: delete deprecated (in 2019) reading name of ui/syntax themes from history file, it's read from user.json
+
+1.156.4 (2022/02)
+
++ add: command "reopen recent file" in the Command Palette (thanks @andersaamodt)
++ add: little better Undo, when one of actions was deleting of selected block by Del/BkSpace (thanks @cser)
++ add: char U+00AD is also shown in hex form (thanks @DUOLabs333)
+- fix: big flickering when editing in PHP blocks (thanks @TomBraider42)
+- fix: Find dialog: activating of 'Hi' option cleared the selection, so broke the find 'in selection only' (thanks @tmsg)
+
+1.156.2 (2022/02)
+
+* change/add: option "renderer_tweaks" has new sub-option 's' to show Unicode-spaces in usual form; default is to show Unicode-spaces in Hex form, like Sublime (thanks @DUOLabs333)
+- fix: app crashed with option "links_regex": ""
+- fix: issue in FindInFiles4 plugin when go-to-found-match did not scroll file to needed line
 - fix: regression with option "renderer_anti_flicker":20 (values 1...999): a) Console is not repainted until click; b) plugin Sync Scroll work is broken (thanks @TomBraider42)
 
 1.156.0 (2022/02)

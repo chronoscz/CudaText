@@ -73,6 +73,7 @@ const
   cmd_FileCloseAndDelete = 2514;
   cmd_FileExportHtml     = 2515;
   cmd_RepaintEditor      = 2516;
+  cmd_FileReopenRecent   = 2517;
 
   cmd_OpsOpenDefaultAndUser = 2519;
   cmd_OpsClearRecent     = 2520;
@@ -211,6 +212,8 @@ const
   cmd_CopyFilenameDir  = 2652;
   cmd_CopyFilenameName = 2653;
 
+  cmd_TabUsesSpaces_On    = 2655;
+  cmd_TabUsesSpaces_Off   = 2656;
   cmd_ToggleTabUsesSpaces = 2657;
   cmd_ConvertTabsToSpaces = 2658;
   cmd_ConvertSpacesToTabsLeading = 2659;
@@ -235,9 +238,14 @@ const
   cmd_LineEndUnix       = 2678;
   cmd_LineEndMac        = 2679;
 
-  cmd_DeleteNewColorAttrs    = 2683;
+  cmd_LineEndWin_Caret     = 2680;
+  cmd_LineEndUnix_Caret    = 2681;
+  cmd_LineEndMac_Caret     = 2682;
+  cmd_LineEndDefault_Caret = 2683;
+
   cmd_FoldingEnable          = 2684;
   cmd_FoldingDisable         = 2685;
+  cmd_DeleteNewColorAttrs    = 2686;
 
   cmd_MenuEnc           = 2691;
   cmd_MenuEnds          = 2692;
@@ -325,8 +333,6 @@ const
   cmd_LinkAtPopup_Copy           = 2809;
 
   cmd_MacroStart                 = 2810;
-  cmd_MacroStop                  = 2811;
-  cmd_MacroCancel                = 2812;
 
   cmd_TreeGotoNext               = 2815;
   cmd_TreeGotoPrev               = 2816;
@@ -346,6 +352,10 @@ const
   cmd_BracketJump                = 2845;
   cmd_BracketSelect              = 2846;
   cmd_BracketSelectInside        = 2847;
+
+  cmd_TabSize_Set2               = 2862;
+  cmd_TabSize_Set4               = 2864;
+  cmd_TabSize_Set8               = 2868;
 
   cmd_GroupActivate1             = 2901;
   cmd_GroupActivate2             = 2902;
@@ -383,6 +393,7 @@ begin
   M.Add(cmd_FileCloseAndDelete, 'file: close tab, delete file', [], []);
   M.Add(cmd_FileExit, 'file: quit program', [cXControl+'+Q'], []);
   M.Add(cmd_FileExportHtml, 'file: export to html', [], []);
+  M.Add(cmd_FileReopenRecent, 'file: reopen recent file', [], []);
   M.Add(cmd_OpenContainingFolder, 'file: open folder containing the current file', [], []);
   M.Add(cmd_OpenFileInDefaultApp, 'file: open file in default application', [], []);
 
@@ -486,7 +497,14 @@ begin
   M.Add(cmd_CopyFilenameDir, 'clipboard: copy filepath only', [], []);
   M.Add(cmd_CopyFilenameName, 'clipboard: copy filename only', [], []);
 
-  M.Add(cmd_ToggleTabUsesSpaces, 'toggle "tabulation-key uses spaces"', [], []);
+  M.Add(cmd_TabUsesSpaces_On, 'tabulation-key uses spaces: turn on', [], []);
+  M.Add(cmd_TabUsesSpaces_Off, 'tabulation-key uses spaces: turn off', [], []);
+  M.Add(cmd_ToggleTabUsesSpaces, 'tabulation-key uses spaces: toggle', [], []);
+
+  M.Add(cmd_TabSize_Set2, 'tabulation size: set to 2', [], []);
+  M.Add(cmd_TabSize_Set4, 'tabulation size: set to 4', [], []);
+  M.Add(cmd_TabSize_Set8, 'tabulation size: set to 8', [], []);
+
   M.Add(cmd_ConvertTabsToSpaces, 'convert tabs (all) to spaces', [], []);
   M.Add(cmd_ConvertTabsToSpacesLeading, 'convert tabs (leading) to spaces', [], []);
   M.Add(cmd_ConvertSpacesToTabsLeading, 'convert spaces (leading) to tabs', [], []);
@@ -555,9 +573,14 @@ begin
   M.Add(cmd_SplitTab6040, 'split tab: 60/40', [], []);
   M.Add(cmd_SplitTab7030, 'split tab: 70/30', [], []);
 
-  M.Add(cmd_LineEndWin, 'change line ends: CRLF', [], []);
-  M.Add(cmd_LineEndUnix, 'change line ends: LF', [], []);
-  M.Add(cmd_LineEndMac, 'change line ends: CR', [], []);
+  M.Add(cmd_LineEndWin, 'change line ends, for entire document: CR LF', [], []);
+  M.Add(cmd_LineEndUnix, 'change line ends, for entire document: LF', [], []);
+  M.Add(cmd_LineEndMac, 'change line ends, for entire document: CR', [], []);
+
+  M.Add(cmd_LineEndWin_Caret, 'change line ends, for line(s) with caret: CR LF', [], []);
+  M.Add(cmd_LineEndUnix_Caret, 'change line ends, for line(s) with caret: LF', [], []);
+  M.Add(cmd_LineEndMac_Caret, 'change line ends, for line(s) with caret: CR', [], []);
+  M.Add(cmd_LineEndDefault_Caret, 'change line ends, for line(s) with caret: default', [], []);
 
   M.Add(cmd_MenuEnc, 'menu: encodings', [], []);
   M.Add(cmd_MenuEnds, 'menu: line ends', [], []);
@@ -701,6 +724,7 @@ begin
     cmd_FileCloseAll,
     cmd_FileCloseAndDelete,
     cmd_FileExportHtml,
+    cmd_FileReopenRecent,
     cmd_ToggleFocusSplitEditors,
     cmd_FocusEditor,
     cmd_FocusNotificationPanel,
@@ -858,8 +882,6 @@ begin
     cmdFirstFileCommand..cmdLastFileCommand,
     cmdFirstRecentCommand..cmdLastRecentCommand,
     cmd_MacroStart,
-    cmd_MacroStop,
-    cmd_MacroCancel,
     cmd_DialogCommands,
     cmd_DialogThemeUi,
     cmd_DialogThemeSyntax,
@@ -889,6 +911,7 @@ begin
     cmd_FileCloseAll,
     cmd_FileCloseAndDelete,
     cmd_FileExportHtml,
+    cmd_FileReopenRecent,
     cmd_ToggleFocusSplitEditors,
     cmd_FocusEditor,
     cmd_ToggleBottomPanel,
@@ -902,6 +925,12 @@ begin
     cmd_ToggleStatusbar,
     cmd_ToggleToolbar,
     cmd_ToggleUiTabs,
+    cmd_TabUsesSpaces_On,
+    cmd_TabUsesSpaces_Off,
+    cmd_ToggleTabUsesSpaces,
+    cmd_ConvertTabsToSpaces,
+    cmd_ConvertSpacesToTabsLeading,
+    cmd_ConvertTabsToSpacesLeading,
     cmd_Groups1,
     cmd_Groups2horz,
     cmd_Groups2vert,
@@ -929,14 +958,39 @@ begin
     cmd_MenuEnc,
     cmd_MenuEnds,
     cmd_MenuLexers,
+
+    cmd_Markers_SelectToCaret,
+    cmd_Markers_DeleteToCaret,
+    cmd_Markers_DropAtCaret,
+    cmd_Markers_GotoLastNoDelete,
+    cmd_Markers_GotoLastAndDelete,
+    cmd_Markers_ClearAll,
+    cmd_Markers_SwapCaretAndMarker,
+
+    cmd_LinkAtCaret_Open,
+    cmd_LinkAtCaret_Copy,
+
+    cmd_BracketHighlightOn,
+    cmd_BracketHighlightOff,
+    cmd_BracketHighlightToggle,
+    cmd_BracketJump,
+    cmd_BracketSelect,
+    cmd_BracketSelectInside,
+
+    cmd_TabSize_Set2,
+    cmd_TabSize_Set4,
+    cmd_TabSize_Set8,
+
     cmd_ResetPythonPlugins,
     cmd_RescanPythonPluginsInfFiles,
     cmd_FindPythonLib,
+
     cmd_HelpAbout,
     cmd_HelpCheckUpdates,
     cmd_HelpForum,
     cmd_HelpWiki,
     cmd_HelpIssues:
+
       Result:= false;
     else
       Result:= true;

@@ -15,7 +15,8 @@ end;
 procedure TfmMain.UpdateCaption_RealWork;
 var
   F: TEditorFrame;
-  SName, SSession, Name1, Name2: string;
+  SName, SSession, SSessionRootPath,
+  Name1, Name2: string;
 begin
   F:= CurrentFrame;
   if F=nil then exit;
@@ -43,9 +44,14 @@ begin
   else
     SName:= F.TabCaption;
 
-  SSession:= ChangeFileExt(ExtractFileName(AppSessionName), '');
+  SSplitByChar(AppSessionName, '|', SSession, SSessionRootPath);
+  SSession:= ChangeFileExt(ExtractFileName(SSession), '');
   if (SSession<>'') and (SSession<>'history session') then
-    SSession:= ' {'+SSession+'}'
+  begin
+    if SBeginsWith(SSessionRootPath, '/sessions/') then
+      Delete(SSessionRootPath, 1, Length('/sessions/'));
+    SSession:= ' {'+SSession+IfThen(SSessionRootPath<>'', ':'+SSessionRootPath)+'}'
+  end
   else
     SSession:= '';
 
@@ -90,17 +96,14 @@ end;
 
 procedure TfmMain.UpdateSidebarButtonFind;
 begin
-  ToolbarSideMid.Buttons[0].Checked:= Assigned(fmFind) and fmFind.Visible;
+  if ToolbarSideMid.ButtonCount>0 then
+    ToolbarSideMid.Buttons[0].Checked:= Assigned(fmFind) and fmFind.Visible;
 end;
 
 procedure TfmMain.UpdateSomeStates(F: TEditorFrame);
 begin
   if F=nil then exit;
-
   UpdateTabCaptionsFromFolders;
-
-  UpdateSidebarButtonFind;
-
   UpdateMenuChecks(F);
 end;
 
@@ -541,7 +544,7 @@ end;
 procedure TfmMain.UpdateMenuRecents(sub: TMenuItem);
 var
   mi: TMenuItem;
-  SName: string;
+  SName, SAccel: string;
   i: integer;
 begin
   if sub=nil then exit;
@@ -549,11 +552,20 @@ begin
 
   for i:= 0 to AppListRecents.Count-1 do
   begin;
-    mi:= TMenuItem.Create(Self);
-    SName:= IntToStr(i+1)+'.  '+
+    if i<9 then
+      SAccel:= '&'+IntToStr(i+1)+'.  '
+    else
+    if i<10+Ord('Z')-Ord('A') then
+      SAccel:= '&'+Chr(i-9+Ord('A'))+'.  '
+    else
+      SAccel:= '';
+    SName:=
       ExtractFileName(AppListRecents[i])+'  ('+
       ExtractFileDir(AppListRecents[i])+')';
-    mi.Caption:= StringReplace(SName, '&', '&&', [rfReplaceAll]);
+    SName:= StringReplace(SName, '&', '&&', [rfReplaceAll]);
+
+    mi:= TMenuItem.Create(sub);
+    mi.Caption:= SAccel + SName;
     mi.Tag:= i;
     mi.OnClick:= @MenuRecentItemClick;
     sub.Add(mi);
@@ -791,7 +803,8 @@ begin
   UpdateMenuItemHotkey(mnuEditCut, cCommand_ClipboardCut);
   UpdateMenuItemHotkey(mnuEditCopy, cCommand_ClipboardCopy);
   UpdateMenuItemHotkey(mnuEditPaste, cCommand_ClipboardPaste);
-  UpdateMenuItemHotkey(mnuEditDel, cCommand_TextDeleteSelection);
+  UpdateMenuItemHotkey(mnuEditPasteIndent, cCommand_ClipboardPasteAndIndent);
+  UpdateMenuItemHotkey(mnuEditPasteHist, cCommand_ClipboardPasteFromRecents);
 
   UpdateMenuItemHotkey(mnuEditCopyLine, cmd_CopyLine);
   UpdateMenuItemHotkey(mnuEditCopyAppend, cCommand_ClipboardCopyAdd);
@@ -951,8 +964,8 @@ begin
   Ed:= F.Editor;
 
   UpdateMenuItemChecked(mnuViewWrap, mnuViewWrap_Alt, Ed.OptWrapMode<>cWrapOff);
-  UpdateMenuItemChecked(mnuViewNums, mnuViewNums_Alt, Ed.Gutter.Items[Ed.GutterBandNumbers].Visible);
-  UpdateMenuItemChecked(mnuViewFold, mnuViewFold_Alt, Ed.Gutter.Items[Ed.GutterBandFolding].Visible);
+  UpdateMenuItemChecked(mnuViewNums, mnuViewNums_Alt, Ed.Gutter.Items[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers)].Visible);
+  UpdateMenuItemChecked(mnuViewFold, mnuViewFold_Alt, Ed.Gutter.Items[Ed.Gutter.FindIndexByTag(ATEditorOptions.GutterTagFolding)].Visible);
   UpdateMenuItemChecked(mnuViewRuler, mnuViewRuler_Alt, Ed.OptRulerVisible);
   UpdateMenuItemChecked(mnuViewMinimap, mnuViewMinimap_Alt, Ed.OptMinimapVisible);
   UpdateMenuItemChecked(mnuViewMicromap, mnuViewMicromap_Alt, Ed.OptMicromapVisible);
@@ -1018,12 +1031,15 @@ var
   Ed: TATSynEdit;
   Ada: TATAdapterEControl;
   bLiteLexer: boolean;
+  Tick: QWord;
 begin
   if AConsiderTreeVisible then
     if not AppPanels[cPaneSide].Visible then exit;
 
   Frame:= CurrentFrame;
   if Frame=nil then exit;
+  CodeTree.Tree.SortType:= Frame.CodetreeSortType;
+
   Ed:= Frame.Editor;
   bLiteLexer:= Ed.AdapterForHilite is TATLiteLexer;
 
@@ -1073,12 +1089,17 @@ begin
 
     if not RunTreeHelper(Frame, FCodetreeBuffer) then
       if Assigned(Ada) then
+      begin
+        //Tick:= GetTickCount64;
         Ada.TreeFill(FCodetreeBuffer);
+        //Tick:= GetTickCount64-Tick;
+        //MsgLogConsole('Tree filling: '+IntToStr(Tick)+'ms');
+      end;
 
     if FCodetreeBuffer.Items.Count>0 then
       DoTreeviewCopy(FCodetreeBuffer, Frame.CachedTreeview[Ed]);
 
-    //Lazarus don't sort new items
+    //Lazarus doesn't sort new items
     if CodeTree.Tree.SortType<>stNone then
       FCodetreeBuffer.AlphaSort;
 
@@ -1300,6 +1321,8 @@ const
   cSidebarIconMenu     = 5;
 
 procedure TfmMain.DoOps_LoadSidebarIcons;
+const
+  cCallerAPI = 'DoOps_LoadSidebarIcons';
 var
   Parts: TRegexParts;
   Str: string;
@@ -1324,12 +1347,12 @@ begin
 
   Str+= DirectorySeparator;
 
-  UpdateImagelistWithIconFromFile(ImageListSide, Str+'tree.png');
-  UpdateImagelistWithIconFromFile(ImageListSide, Str+'console.png');
-  UpdateImagelistWithIconFromFile(ImageListSide, Str+'output.png');
-  UpdateImagelistWithIconFromFile(ImageListSide, Str+'validate.png');
-  UpdateImagelistWithIconFromFile(ImageListSide, Str+'find.png');
-  UpdateImagelistWithIconFromFile(ImageListSide, Str+'menu.png');
+  UpdateImagelistWithIconFromFile(ImageListSide, Str+'tree.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(ImageListSide, Str+'console.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(ImageListSide, Str+'output.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(ImageListSide, Str+'validate.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(ImageListSide, Str+'find.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(ImageListSide, Str+'menu.png', cCallerAPI);
 
   if UiOps.LogConsoleDetailedStartupTime then
   begin
@@ -1364,10 +1387,12 @@ begin
 
   Sep.Init(UiOps.TreeIconFilenames);
   while Sep.GetItemStr(SItem) do
-    UpdateImagelistWithIconFromFile(ImageListTree, SPath+SItem+'.png');
+    UpdateImagelistWithIconFromFile(ImageListTree, SPath+SItem+'.png', 'DoOps_LoadCodetreeIcons');
 end;
 
 procedure TfmMain.DoOps_LoadToolbarIcons;
+const
+  cCallerAPI = 'DoOps_LoadToolbarIcons';
 var
   Parts: TRegexParts;
   Str: string;
@@ -1392,21 +1417,21 @@ begin
   Img.Clear;
 
   Str+= DirectorySeparator;
-  UpdateImagelistWithIconFromFile(Img, Str+'f_new.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'f_open.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'f_save.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'e_cut.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'e_copy.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'e_paste.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'e_undo.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'e_redo.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'unpri.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'map.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'indent.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'unindent.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'case.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'comment.png');
-  UpdateImagelistWithIconFromFile(Img, Str+'opt.png');
+  UpdateImagelistWithIconFromFile(Img, Str+'f_new.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'f_open.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'f_save.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'e_cut.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'e_copy.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'e_paste.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'e_undo.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'e_redo.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'unpri.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'map.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'indent.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'unindent.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'case.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'comment.png', cCallerAPI);
+  UpdateImagelistWithIconFromFile(Img, Str+'opt.png', cCallerAPI);
 
   if UiOps.LogConsoleDetailedStartupTime then
   begin
@@ -1592,6 +1617,29 @@ begin
       mi.OnClick:= @MenuPicScaleClick;
       PopupPicScale.Items.Add(mi);
     end;
+  end;
+end;
+
+procedure TfmMain.UpdateEditorShowCaret;
+//solves issue #4022
+//it makes sense for all Wrap modes
+var
+  Ed: TATSynEdit;
+  Caret: TATCaretItem;
+begin
+  Ed:= CurrentEditor;
+  if Assigned(Ed) and (Ed.Carets.Count=1) then
+  begin
+    Caret:= Ed.Carets[0];
+    Application.ProcessMessages; //must have
+    Ed.DoShowPos(
+      Point(Caret.PosX, Caret.PosY),
+      UiOps.FindIndentHorz,
+      UiOps.FindIndentVert,
+      false, //Unfold
+      true, //AllowUpdate
+      true //AllowProximity
+      );
   end;
 end;
 

@@ -21,7 +21,7 @@ uses
   Clipbrd,
   at__jsonConf,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Adapter_EControl,
   ATSynEdit_Finder,
   ATStringProc,
@@ -86,7 +86,7 @@ procedure DoApplyThemeToToolbar(C: TATFlatToolbar);
 function ConvertTwoPointsToDiffPoint(APrevPnt, ANewPnt: TPoint): TPoint;
 function ConvertShiftStateToString(const Shift: TShiftState): string;
 function KeyboardStateToShiftState: TShiftState; //like VCL
-function UpdateImagelistWithIconFromFile(AList: TCustomImagelist; const AFilename: string): integer;
+function UpdateImagelistWithIconFromFile(AList: TCustomImagelist; const AFilename, ACallerAPI: string): integer;
 function FormatFileDateAsNiceString(const AFilename: string): string;
 function FormatFilenameForMenu(const fn: string): string;
 
@@ -254,15 +254,16 @@ begin
 end;
 
 
-function UpdateImagelistWithIconFromFile(AList: TCustomImagelist; const AFilename: string): integer;
+function UpdateImagelistWithIconFromFile(AList: TCustomImagelist; const AFilename, ACallerAPI: string): integer;
 var
   bmp: TCustomBitmap;
   ext: string;
 begin
   Result:= -1;
+  if AFilename='' then exit;
   if not FileExists(AFilename) then
   begin
-    MsgLogConsole('ERROR: Missing icon filename: '+AFilename);
+    MsgLogConsole('ERROR: Missing icon filename in '+ACallerAPI+': '+AFilename);
     exit;
   end;
 
@@ -294,7 +295,7 @@ begin
     end
     else
     begin
-      MsgLogConsole('ERROR: Unknown icon file type: '+AFilename);
+      MsgLogConsole('ERROR: Unknown icon file type in '+ACallerAPI+': '+AFilename);
       exit;
     end;
 
@@ -506,6 +507,11 @@ begin
     Result+= 'h';
   if Clipboard.HasPictureFormat then
     Result+= 'p';
+
+  if Clipboard.HasFormat(ATEditorOptions.ClipboardColumnFormat) then
+    Result+= 'c';
+  if Clipboard.HasFormat(ATEditorOptions.ClipboardExFormat) then
+    Result+= 'x';
 end;
 
 procedure AppScalePanelControls(APanel: TWinControl);
@@ -1148,5 +1154,4 @@ end;
 
 
 end.
-
 

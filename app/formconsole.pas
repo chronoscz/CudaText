@@ -17,7 +17,7 @@ uses
   PythonEngine,
   ATStrings,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Edits,
   ATSynEdit_Commands,
   ATSynEdit_Adapter_Simple,
@@ -219,8 +219,8 @@ begin
     DoCommand(cCommand_GotoTextEnd, cInvokeAppInternal);
     ColumnLeft:= 0;
 
-    //console was not repainted with "renderer_anti_flicker":20, this fixes it:
-    InvalidateEx(true, false);
+    //extra params of Update() are not needed
+    Update;
   end;
 end;
 
@@ -504,4 +504,3 @@ finalization
     FreeAndNil(fmConsole);
 
 end.
-

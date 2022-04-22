@@ -29,7 +29,7 @@ uses
   IniFiles,
   Process,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Keymap,
   ATSynEdit_Keymap_Init,
   ATSynEdit_Adapter_litelexer,
@@ -145,33 +145,38 @@ var
   AppServerId: string = 'cudatext.0'; //used by TUniqueInstance (which is used only on Unix)
 
 var
-  AppFrameList1: TFPList; //all frames - for main thread
-  AppFrameList2: TFPList; //all frames - for file watcher thread
-  AppFrameListDeleting: TFPList; //frames which need to be Free'd
-                              //we don't free frames instantly, because watcher thread can access them
+  AppFrameList1: TFPList = nil;
+    //all frames - for main thread
 
-  AppEventLister: TEvent; //event set to signaled, when main thread has done AppFrameList2 updating
-  AppEventWatcher: TEvent; //event set to signaled, when watcher thread is not busy
+  AppFrameList2: TFPList = nil;
+    //all frames - for file watcher thread
 
-type
-  TAppKeyValue = class
-    Key: string;
-    Value: string;
-  end;
+  AppFrameListDeleting: TFPList = nil;
+    //frames which need to be Free'd
+    //we don't free frames instantly, because watcher thread can access them
+
+  AppEventLister: TEvent = nil; //event set to signaled, when main thread has done AppFrameList2 updating
+  AppEventWatcher: TEvent = nil; //event set to signaled, when watcher thread is not busy
 
 type
   { TAppKeyValues }
 
   TAppKeyValues = class(TFPList)
+  private type
+    TAppKeyValue = class
+      Key: string;
+      Value: string;
+    end;
   public
     procedure Add(const AKey, AValue: string);
     function GetValue(const AKey, ADefValue: string): string;
+    function GetValueByRegex(ALine: string; ACaseSens: boolean): string;
   end;
 
 var
-  AppConfig_Detect: TAppKeyValues;
-  AppConfig_DetectLine: TAppKeyValues;
-  AppConfig_PGroups: TAppKeyValues;
+  AppConfig_Detect: TAppKeyValues = nil;
+  AppConfig_DetectLine: TAppKeyValues = nil;
+  AppConfig_PGroups: TAppKeyValues = nil;
 
 const
   AppExtensionThemeUi = '.cuda-theme-ui';
@@ -199,6 +204,7 @@ type
     InfoAboutOptionsEditor: boolean;
     AllowFrameParsing: boolean; //must be set in FormMain.OnShow
     AllowRunPkExec: boolean;
+    AllowCheckConfigsForNullBytes: boolean;
 
     LogPluginIniting: boolean;
     LogSessions: boolean;
@@ -660,29 +666,30 @@ var
   EditorOps: TEditorOps;
 
 var
-  AppDir_Home: string;
-  AppDir_Settings: string;
-  AppDir_SettingsDefault: string;
-  AppDir_Py: string;
-  AppDir_Data: string;
-  AppDir_Lexers: string;
-  AppDir_LexersLite: string;
-  AppDir_DataThemes: string;
-  AppDir_DataAutocomplete: string;
-  AppDir_DataAutocompleteSpec: string;
-  AppDir_DataLang: string;
-  AppDir_DataSidebarIcons: string;
-  AppDir_DataCodetreeIcons: string;
-  AppDir_DataToolbarIcons: string;
+  AppUserName: string = '';
+  AppDir_Home: string = '';
+  AppDir_Settings: string = '';
+  AppDir_SettingsDefault: string = '';
+  AppDir_Py: string = '';
+  AppDir_Data: string = '';
+  AppDir_Lexers: string = '';
+  AppDir_LexersLite: string = '';
+  AppDir_DataThemes: string = '';
+  AppDir_DataAutocomplete: string = '';
+  AppDir_DataAutocompleteSpec: string = '';
+  AppDir_DataLang: string = '';
+  AppDir_DataSidebarIcons: string = '';
+  AppDir_DataCodetreeIcons: string = '';
+  AppDir_DataToolbarIcons: string = '';
   AppDir_LastInstalledAddon: string = '';
-  AppFile_OptionsDefault: string;
-  AppFile_OptionsUserInit: string;
-  AppFile_OptionsUser: string;
-  AppFile_History: string;
-  AppFile_HistoryFiles: string;
-  AppFile_Hotkeys: string;
-  AppFile_PluginsIni: string;
-  AppFile_LogConsole: string;
+  AppFile_OptionsDefault: string = '';
+  AppFile_OptionsUserInit: string = '';
+  AppFile_OptionsUser: string = '';
+  AppFile_History: string = '';
+  AppFile_HistoryFiles: string = '';
+  AppFile_Hotkeys: string = '';
+  AppFile_PluginsIni: string = '';
+  AppFile_LogConsole: string = '';
 
 function AppFile_Session: string;
 function AppFile_Language: string;
@@ -704,6 +711,8 @@ procedure MsgBadConfig(const fn, msg: string);
 procedure MsgStdout(const Str: string; AllowMsgBox: boolean = false);
 procedure MsgLogConsole(const AText: string);
 procedure MsgLogToFilename(const AText, AFilename: string; AWithTime: boolean);
+procedure MsgOldApi(const s: string);
+procedure MsgFileFromSessionNotFound(const fn: string);
 
 function AppListboxItemHeight(AScale, ADoubleHeight: boolean): integer;
 procedure AppGetFileProps(const FileName: string; out P: TAppFileProps);
@@ -771,7 +780,7 @@ type
   end;
 
 const
-  AppEncodings: array[0..38] of TAppEncodingRecord = (
+  AppEncodings: array[0..39] of TAppEncodingRecord = (
     (Sub: ''; Name: cEncNameUtf8_NoBom; ShortName: 'utf8'),
     (Sub: ''; Name: cEncNameUtf8_WithBom; ShortName: 'utf8_bom'),
     (Sub: ''; Name: cEncNameUtf16LE_NoBom; ShortName: 'utf16le'),
@@ -787,6 +796,7 @@ const
     (Sub: 'eu'; Name: 'cp1251'; ShortName: 'cp1251'),
     (Sub: 'eu'; Name: 'cp1252'; ShortName: 'cp1252'),
     (Sub: 'eu'; Name: 'cp1253'; ShortName: 'cp1253'),
+    (Sub: 'eu'; Name: 'cp1254'; ShortName: 'cp1254'),
     (Sub: 'eu'; Name: 'cp1257'; ShortName: 'cp1257'),
     (Sub: 'eu'; Name: '-'; ShortName: ''),
     (Sub: 'eu'; Name: 'cp437'; ShortName: 'cp437'),
@@ -794,11 +804,11 @@ const
     (Sub: 'eu'; Name: 'cp852'; ShortName: 'cp852'),
     (Sub: 'eu'; Name: 'cp866'; ShortName: 'cp866'),
     (Sub: 'eu'; Name: '-'; ShortName: ''),
-    (Sub: 'eu'; Name: 'iso88591'; ShortName: 'iso88591'),
-    (Sub: 'eu'; Name: 'iso88592'; ShortName: 'iso88592'),
-    (Sub: 'eu'; Name: 'iso885915'; ShortName: 'iso885915'),
+    (Sub: 'eu'; Name: 'iso-8859-1'; ShortName: 'iso-8859-1'),
+    (Sub: 'eu'; Name: 'iso-8859-2'; ShortName: 'iso-8859-2'),
+    (Sub: 'eu'; Name: 'iso-8859-9'; ShortName: 'iso-8859-9'),
+    (Sub: 'eu'; Name: 'iso-8859-15'; ShortName: 'iso-8859-15'),
     (Sub: 'eu'; Name: 'mac'; ShortName: 'mac'),
-    (Sub: 'mi'; Name: 'cp1254'; ShortName: 'cp1254'),
     (Sub: 'mi'; Name: 'cp1255'; ShortName: 'cp1255'),
     (Sub: 'mi'; Name: 'cp1256'; ShortName: 'cp1256'),
     (Sub: 'mi'; Name: '-'; ShortName: ''),
@@ -864,6 +874,7 @@ type
     cEventOnMacro,
     cEventOnAppActivate,
     cEventOnAppDeactivate,
+    cEventOnDeleteFile,
     cEventOnCLI,
     cEventOnExit
     );
@@ -919,6 +930,7 @@ const
     'on_macro',
     'on_app_activate',
     'on_app_deactivate',
+    'on_delete_file',
     'on_cli',
     'on_exit'
     );
@@ -957,11 +969,11 @@ type
   end;
 
 var
-  AppConsoleQueue: TAppConsoleQueue;
-  AppCommandsDelayed: TAppCommandsDelayed;
-  AppCommandList: TFPList;
-  AppEventList: TFPList;
-  AppTreeHelpers: TFPList;
+  AppConsoleQueue: TAppConsoleQueue = nil;
+  AppCommandsDelayed: TAppCommandsDelayed = nil;
+  AppCommandList: TFPList = nil;
+  AppEventList: TFPList = nil;
+  AppTreeHelpers: TFPList = nil;
 
 type
   TAppMenuProps = class
@@ -1015,6 +1027,7 @@ procedure Lexer_DetectByFilename(const AFilename: string;
   out Lexer: TecSyntAnalyzer;
   out LexerLite: TATLiteLexer;
   out LexerName: string;
+  out ATooBigForLexer: boolean;
   AChooseFunc: TecLexerChooseFunc);
 function Lexer_DetectByFilenameOrContent(const AFilename: string;
   AChooseFunc: TecLexerChooseFunc): TecSyntAnalyzer;
@@ -1148,8 +1161,13 @@ var
 {$endif}
 begin
   Result:= fn;
+
   {$ifndef windows}
   S:= AppDir_Home;
+
+  if fn+DirectorySeparator=S then
+    exit('~');
+
   if SBeginsWith(Result, S) then
     Result:= '~'+DirectorySeparator+Copy(Result, Length(S)+1, MaxInt);
   {$endif}
@@ -1257,6 +1275,7 @@ procedure InitDirs_macOS;
 begin
   //from https://github.com/graemeg/freepascal/blob/master/rtl/unix/sysutils.pp
   AppDir_Home:= GetEnvironmentVariable('HOME');
+  AppUserName:= ExtractFileName(AppDir_Home);
   if AppDir_Home<>'' then
     AppDir_Home:= IncludeTrailingPathDelimiter(AppDir_Home);
   OpDirLocal:= AppDir_Home+'Library/Application Support/CudaText';
@@ -1281,6 +1300,7 @@ var
 begin
   //from https://github.com/graemeg/freepascal/blob/master/rtl/unix/sysutils.pp
   AppDir_Home:= GetEnvironmentVariable('HOME');
+  AppUserName:= ExtractFileName(AppDir_Home);
   if AppDir_Home<>'' then
     AppDir_Home:= IncludeTrailingPathDelimiter(AppDir_Home);
 
@@ -1842,6 +1862,7 @@ begin
     InfoAboutOptionsEditor:= true;
     AllowFrameParsing:= false;
     AllowRunPkExec:= true;
+    AllowCheckConfigsForNullBytes:= true;
 
     LogPluginIniting:= true;
     LogSessions:= true;
@@ -1888,7 +1909,7 @@ begin
     ReopenSession:= true;
     ReopenSessionWithCmdLine:= false;
     SessionSaveInterval:= 30;
-    SessionSaveOnExit:= false;
+    SessionSaveOnExit:= true;
     BackupLastSessions:= 0;
     SaveModifiedTabsOnClose:= true;
 
@@ -2079,7 +2100,6 @@ const
   cSignUTF8: string = #$EF#$BB#$BF;
 var
   SNameOnly: string;
-  Item: TAppKeyValue;
   ext, sLine, res: string;
   i: integer;
 begin
@@ -2121,13 +2141,10 @@ begin
     begin
       //skip UTF8 signature, needed for XMLs
       if SBeginsWith(sLine, cSignUTF8) then
-        Delete(sLine, 1, Length(cSignUTF8));
-      for i:= 0 to AppConfig_DetectLine.Count-1 do
-      begin
-        Item:= TAppKeyValue(AppConfig_DetectLine[i]);
-        if SRegexMatchesString(sLine, Item.Key, true) then
-          exit(AppManager.FindLexerByName(Item.Value));
-      end;
+        System.Delete(sLine, 1, Length(cSignUTF8));
+      res:= AppConfig_DetectLine.GetValueByRegex(sLine, true);
+      if res<>'' then
+        exit(AppManager.FindLexerByName(res));
     end;
   end;
 
@@ -2417,15 +2434,17 @@ end;
 
 function AppSessionName_ForHistoryFile: string;
 var
-  dir: string;
+  sDir, sFilename, sJsonPath: string;
 begin
   if not UiOps.ReopenSession then exit('');
 
-  dir:= ExtractFileDir(AppSessionName);
-  if dir='' then exit(AppSessionName);
+  SSplitByChar(AppSessionName, '|', sFilename, sJsonPath);
 
-  if SameFileName(dir, AppDir_Settings) then
-    Result:= ExtractFileName(AppSessionName)
+  sDir:= ExtractFileDir(sFilename);
+  if sDir='' then exit(AppSessionName);
+
+  if SameFileName(sDir, AppDir_Settings) then
+    Result:= ExtractFileName(sFilename)+IfThen(sJsonPath<>'', '|'+sJsonPath)
   else
     Result:= AppSessionName;
 end;
@@ -2695,6 +2714,16 @@ begin
   {$Pop}
 end;
 
+procedure MsgOldApi(const s: string);
+begin
+  MsgLogConsole(Format(msgApiDeprecated, [s]));
+end;
+
+procedure MsgFileFromSessionNotFound(const fn: string);
+begin
+  if not StartsStr(GetTempDir, fn) then
+    MsgLogConsole(Format(msgCannotFindSessionFile, [AppCollapseHomeDirInFilename(fn)]));
+end;
 
 function AppEncodingShortnameToFullname(const S: string): string;
 var
@@ -2786,16 +2815,19 @@ procedure Lexer_DetectByFilename(const AFilename: string;
   out Lexer: TecSyntAnalyzer;
   out LexerLite: TATLiteLexer;
   out LexerName: string;
+  out ATooBigForLexer: boolean;
   AChooseFunc: TecLexerChooseFunc);
 begin
   LexerName:= '';
   Lexer:= nil;
   LexerLite:= nil;
+  ATooBigForLexer:= false;
   if AFilename='' then exit;
 
   if IsFileTooBigForLexer(AFilename) then
   begin
     LexerLite:= AppManagerLite.FindLexerByFilename(AFilename);
+    ATooBigForLexer:= true;
   end
   else
   begin
@@ -2911,6 +2943,21 @@ begin
   end;
   Result:= ADefValue;
 end;
+
+function TAppKeyValues.GetValueByRegex(ALine: string; ACaseSens: boolean): string;
+var
+  Item: TAppKeyValue;
+  i: integer;
+begin
+  Result:= '';
+  for i:= 0 to Count-1 do
+  begin
+    Item:= TAppKeyValue(Items[i]);
+    if SRegexMatchesString(ALine, Item.Key, ACaseSens) then
+      exit(Item.Value);
+  end;
+end;
+
 
 procedure DoMenuitemEllipsis(c: TMenuItem);
 var
@@ -3278,10 +3325,15 @@ begin
 end;
 
 function IsDefaultSession(const S: string): boolean;
+var
+  sFilename, sJsonPath: string;
 begin
+  if S='' then
+    exit(true);
+  SSplitByChar(S, '|', sFilename, sJsonPath);
   Result:=
-    (S='') or
-    (ChangeFileExt(ExtractFileName(S), '')=cAppSessionDefaultBase);
+    (sJsonPath='') and
+    (ChangeFileExt(ExtractFileName(sFilename), '')=cAppSessionDefaultBase);
 end;
 
 function IsDefaultSessionActive: boolean;
@@ -3290,11 +3342,15 @@ begin
 end;
 
 function AppFile_Session: string;
+var
+  sFilename, sJsonPath: string;
 begin
   Result:= AppSessionName;
   if Result='' then
     Result:= cAppSessionDefault;
-  if ExtractFileDir(Result)='' then
+
+  SSplitByChar(Result, '|', sFilename, sJsonPath);
+  if ExtractFileDir(sFilename)='' then
     Result:= AppDir_Settings+DirectorySeparator+Result;
 end;
 
@@ -3399,13 +3455,10 @@ initialization
   AppConfig_DetectLine:= TAppKeyValues.Create;
   AppConfig_PGroups:= TAppKeyValues.Create;
 
-  ////detection of Shell files
-  ////disabled: it detects Python files with shebang
-  //AppConfig_DetectLine_Keys.Add('\#!.+');
-  //AppConfig_DetectLine_Values.Add('Bash script');
-
-  //detection of XML
   AppConfig_DetectLine.Add('<\?xml .+', 'XML');
+  AppConfig_DetectLine.Add('\#!\/bin\/(ba)?sh', 'Bash script');
+  AppConfig_DetectLine.Add('\#!\/usr\/bin\/env (ba)?sh', 'Bash script');
+  AppConfig_DetectLine.Add('\#!\/usr\/bin\/env python\d*', 'Python');
 
   AppFrameList1:= TFPList.Create;
   AppFrameList2:= TFPList.Create;
@@ -3423,6 +3476,8 @@ initialization
   AppManagerLite.OnGetStyleHash:= @LiteLexer_GetStyleHash;
   AppManagerLite.OnApplyStyle:= @LiteLexer_ApplyStyle;
   AppManagerThread:= TAppManagerThread.Create(false);
+
+  ATEditorOptions.MaxClipboardRecents:= 15;
 
 finalization
 
@@ -3454,4 +3509,3 @@ finalization
     FreeAndNil(AppLexersLastDetected);
 
 end.
-

@@ -1,4 +1,4 @@
-object SyntAnal8: TLibSyntAnalyzer
+object SyntAnal6: TLibSyntAnalyzer
   Formats = <
     item
       DisplayName = 'Style'
@@ -237,7 +237,7 @@ object SyntAnal8: TLibSyntAnalyzer
       BlockName = '{'
       NotParent = True
       TokenType = 2
-      Expression = ':{1,2}[\w\-]+'
+      Expression = ':{1,2}[a-z\-][\w\-]*'
       ColumnFrom = 0
       ColumnTo = 0
     end
@@ -254,7 +254,9 @@ object SyntAnal8: TLibSyntAnalyzer
       DisplayName = 'Number'
       StyleName = 'Number'
       TokenType = 7
-      Expression = '[\-\+]? \d*\.?\d+ (e[\-\+]?\d+)?'
+      Expression = 
+        '[\-\+]? \d+(\.\d*)? (e[\-\+]?\d+)? |'#13#10'[\-\+]? \.\d+ (e[\-\+]?\d+' +
+        ')?'
       ColumnFrom = 0
       ColumnTo = 0
     end
@@ -262,7 +264,7 @@ object SyntAnal8: TLibSyntAnalyzer
       DisplayName = 'PHP tag'
       StyleName = 'PHP tag'
       TokenType = 8
-      Expression = '<\?php | <\? | \?>'
+      Expression = '<\?php\b | <\? | \?>'
       ColumnFrom = 0
       ColumnTo = 0
     end
@@ -286,7 +288,7 @@ object SyntAnal8: TLibSyntAnalyzer
       DisplayName = 'Value unit'
       StyleName = 'Value unit incorrect'
       TokenType = 10
-      Expression = '(?<=\b\d+)[a-z%]+\b'
+      Expression = '(?<=\b[\d\.]+)[a-z%]+\b'
       ColumnFrom = 0
       ColumnTo = 0
     end
@@ -410,6 +412,8 @@ object SyntAnal8: TLibSyntAnalyzer
             'bold'
             'bolder'
             'border'
+            'border-block'
+            'border-block-color'
             'border-block-end'
             'border-block-end-color'
             'border-block-end-style'
@@ -418,6 +422,8 @@ object SyntAnal8: TLibSyntAnalyzer
             'border-block-start-color'
             'border-block-start-style'
             'border-block-start-width'
+            'border-block-style'
+            'border-block-width'
             'border-bottom'
             'border-bottom-color'
             'border-bottom-left-radius'
@@ -435,6 +441,8 @@ object SyntAnal8: TLibSyntAnalyzer
             'border-image-slice'
             'border-image-source'
             'border-image-width'
+            'border-inline'
+            'border-inline-color'
             'border-inline-end'
             'border-inline-end-color'
             'border-inline-end-style'
@@ -443,6 +451,8 @@ object SyntAnal8: TLibSyntAnalyzer
             'border-inline-start-color'
             'border-inline-start-style'
             'border-inline-start-width'
+            'border-inline-style'
+            'border-inline-width'
             'border-left'
             'border-left-color'
             'border-left-style'
@@ -520,13 +530,14 @@ object SyntAnal8: TLibSyntAnalyzer
             'content'
             'content-box'
             'contents'
+            'content-visibility'
             'context-menu'
             'contextual'
             'copy'
             'counter-increment'
             'counter-reset'
+            'counter-set'
             'cover'
-            'crispEdges'
             'crisp-edges'
             'crosshair'
             'cursor'
@@ -625,6 +636,7 @@ object SyntAnal8: TLibSyntAnalyzer
             'font-variant-position'
             'font-variation-settings'
             'font-weight'
+            'forced-color-adjust'
             'forwards'
             'freeze'
             'from-image'
@@ -853,6 +865,7 @@ object SyntAnal8: TLibSyntAnalyzer
             'offset-distance'
             'offset-path'
             'offset-position'
+            'offset-rotate'
             'offset-rotation'
             'oldstyle-nums'
             'opacity'
@@ -931,6 +944,7 @@ object SyntAnal8: TLibSyntAnalyzer
             'pre-line'
             'preserve-3d'
             'pre-wrap'
+            'print-color-adjust'
             'progress'
             'progressive'
             'proportional-nums'
@@ -1106,6 +1120,7 @@ object SyntAnal8: TLibSyntAnalyzer
             'text-decoration-skip'
             'text-decoration-skip-ink'
             'text-decoration-style'
+            'text-decoration-thickness'
             'text-emphasis'
             'text-emphasis-color'
             'text-emphasis-position'
@@ -1871,9 +1886,11 @@ object SyntAnal8: TLibSyntAnalyzer
             '-webkit-tap-highlight-color'
             '-webkit-text-align-last'
             '-webkit-text-combine'
+            '-webkit-text-decoration'
             '-webkit-text-decoration-color'
             '-webkit-text-decoration-line'
             '-webkit-text-decorations-in-effect'
+            '-webkit-text-decoration-skip-ink'
             '-webkit-text-decoration-style'
             '-webkit-text-emphasis-color'
             '-webkit-text-emphasis-position'
@@ -1976,6 +1993,7 @@ object SyntAnal8: TLibSyntAnalyzer
     item
       DisplayName = 'Id colors'
       StyleName = 'Color'
+      BlockName = '{'
       BlockType = btTagDetect
       ConditionList = <
         item
@@ -2149,7 +2167,6 @@ object SyntAnal8: TLibSyntAnalyzer
           IgnoreCase = True
         end>
       HighlightPos = cpAny
-      TokenType = 6
       IgnoreAsParent = False
     end
     item
@@ -2245,7 +2262,7 @@ object SyntAnal8: TLibSyntAnalyzer
       IgnoreAsParent = False
     end
     item
-      DisplayName = '{ @media'
+      DisplayName = '@media {'
       ConditionList = <
         item
           TagList.Strings = (
@@ -2254,18 +2271,18 @@ object SyntAnal8: TLibSyntAnalyzer
         end
         item
           CondType = tcSkip
-          TokenTypes = 1164
+          TokenTypes = 5788
         end
         item
           TokenTypes = 32
         end>
       BlockEnd = '}'
       NameFmt = '%s0~[{]1'
-      GroupFmt = '\Media'
       RefToCondEnd = True
       HighlightPos = cpAny
       CancelNextRules = True
       CollapseFmt = '%s0~[{]1 { ... }'
+      TreeItemImage = 6
       IgnoreAsParent = False
     end
     item
@@ -2280,12 +2297,12 @@ object SyntAnal8: TLibSyntAnalyzer
       BlockEnd = '}'
       Highlight = True
       InvertColors = True
-      NameFmt = '%sl1'
-      GroupFmt = '\Styles'
+      NameFmt = 'CSS'
       DynHighlight = dhRange
       HighlightPos = cpRange
       DynSelectMin = True
       CollapseFmt = '{ ... }'
+      TreeItemImage = 4
       IgnoreAsParent = False
       AutoCloseMode = acmCloseNearest
       AutoCloseText = '}'#13#10
@@ -2304,6 +2321,7 @@ object SyntAnal8: TLibSyntAnalyzer
     end
     item
       DisplayName = 'Media'
+      Enabled = False
       StyleName = 'Current block BG'
       ConditionList = <
         item
@@ -2317,10 +2335,12 @@ object SyntAnal8: TLibSyntAnalyzer
       HighlightPos = cpRange
       DynSelectMin = True
       NoEndRule = True
+      TreeItemImage = 2
       IgnoreAsParent = False
     end
     item
       DisplayName = 'Prop'
+      Enabled = False
       BlockName = '{'
       ConditionList = <
         item
@@ -2332,6 +2352,7 @@ object SyntAnal8: TLibSyntAnalyzer
     end
     item
       DisplayName = 'Prop end'
+      Enabled = False
       BlockType = btRangeEnd
       ConditionList = <
         item
@@ -2354,6 +2375,7 @@ object SyntAnal8: TLibSyntAnalyzer
       GroupFmt = '\Colors'
       HighlightPos = cpAny
       NoEndRule = True
+      TreeItemImage = 7
       IgnoreAsParent = False
     end
     item
@@ -2391,16 +2413,16 @@ object SyntAnal8: TLibSyntAnalyzer
   SubAnalyzers = <
     item
       DisplayName = 'PHP'
-      StartExpression = '<\?(php)?'
+      StartExpression = '<\?(php\b)?'
       EndExpression = '\?>'
-      SyntAnalyzer = SyntAnal19
+      SyntAnalyzer = SyntAnal15
     end>
   SampleText.Strings = (
     '/* Comment */'
     '<?php echo '#39'test'#39' ?>'
     '.name, .name2:suffix { '
-    '  font-size: 10em;'
-    '  --my-var: 10.2e+2; /* custom prop; float */'
+    '  font-size: 10em + 2.em;'
+    '  --my-var: -10.2e+2; /* custom prop; float */'
     '  background: url("../img.gif") no-repeat;'
     '  back2: url(http://www.com/url);'
     '  back3: url(../img.gif);'

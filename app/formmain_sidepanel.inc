@@ -58,7 +58,7 @@ begin
   if ExtractFileDir(AFilename)='' then
     AFilename:= AppDir_DataSidebarIcons+DirectorySeparator+UiOps.SidebarTheme+DirectorySeparator+AFilename;
 
-  Result:= UpdateImagelistWithIconFromFile(ImageListSide, AFilename);
+  Result:= UpdateImagelistWithIconFromFile(ImageListSide, AFilename, 'DoSidebar_FilenameToImageIndex');
 end;
 
 
@@ -153,5 +153,10 @@ end;
 procedure TfmMain.DoSidebar_OnCloseFloatForm(Sender: TObject; var CloseAction: TCloseAction);
 begin
   UpdateMenuItemChecked(mnuViewSide, mnuViewSide_Alt, false);
+end;
+
+procedure TfmMain.DoSidebar_OnShowHide(Sender: TObject);
+begin
+  UpdateEditorShowCaret;
 end;
 

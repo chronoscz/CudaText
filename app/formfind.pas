@@ -20,7 +20,7 @@ uses
   ATStringProc,
   ATCanvasPrimitives,
   ATSynEdit,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_Carets,
   ATSynEdit_Edits,
   ATSynEdit_Commands,
@@ -166,6 +166,7 @@ type
     procedure edRepExit(Sender: TObject);
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure FormCreate(Sender: TObject);
+    procedure FormHide(Sender: TObject);
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormResize(Sender: TObject);
     procedure FormShow(Sender: TObject);
@@ -197,6 +198,7 @@ type
     FMultiLine: boolean;
     FNarrow: boolean;
     FOnResult: TAppFinderOperationEvent;
+    FOnChangeVisible: TNotifyEvent;
     FOnChangeOptions: TNotifyEvent;
     FOnFocusEditor: TNotifyEvent;
     FOnGetMainEditor: TAppFinderGetEditor;
@@ -241,6 +243,7 @@ type
     function CurrentCaption: string;
     property OnResult: TAppFinderOperationEvent read FOnResult write FOnResult;
     property OnChangeOptions: TNotifyEvent read FOnChangeOptions write FOnChangeOptions;
+    property OnChangeVisible: TNotifyEvent read FOnChangeVisible write FOnChangeVisible;
     property OnFocusEditor: TNotifyEvent read FOnFocusEditor write FOnFocusEditor;
     property OnGetMainEditor: TAppFinderGetEditor read FOnGetMainEditor write FOnGetMainEditor;
     property OnGetToken: TATFinderGetToken read FOnGetToken write FOnGetToken;
@@ -539,6 +542,10 @@ begin
   FMenuitemOptHiAll.Caption:= msgFindHint_HiAll;
   FMenuitemOptHiAll.Checked:= chkHiAll.Checked;
   FMenuitemOptHiAll.ShortCut:= TextToShortCut(UiOps.HotkeyToggleHiAll);
+  FMenuitemOptHiAll.Enabled:= chkHiAll.Enabled;
+  if not FMenuitemOptHiAll.Enabled then
+    FMenuitemOptHiAll.Caption:= FMenuitemOptHiAll.Caption+' '+
+      Format('("find_hi_max_lines": %d)', [UiOps.FindHiAll_MaxLines]);
 
   FMenuitemOptRegexSubst.Caption:= msgFindHint_RegexSubst;
   FMenuitemOptRegexSubst.Checked:= chkRegexSubst.Checked;
@@ -806,6 +813,12 @@ begin
 
   Adapter:= TATAdapterEControl.Create(Self);
   Adapter.Lexer:= AppManager.FindLexerByName('RegEx');
+end;
+
+procedure TfmFind.FormHide(Sender: TObject);
+begin
+  if Assigned(FOnChangeVisible) then
+    FOnChangeVisible(Self);
 end;
 
 
@@ -1111,6 +1124,9 @@ begin
   UpdateFonts;
   FixFormPositionToDesktop(Self);
   OnResize(Self);
+
+  if Assigned(FOnChangeVisible) then
+    FOnChangeVisible(Self);
 end;
 
 procedure TfmFind.UpdateInitialCaretPos;
@@ -1274,7 +1290,11 @@ const
 var
   N: integer;
 begin
-  N:= Max(cMinHeight, IfThen(IsReplace, MaxY(edRep), MaxY(edFind)) + cHeightIncrease);
+  if IsReplace then
+    N:= MaxY(edRep)
+  else
+    N:= MaxY(edFind);
+  N:= Max(cMinHeight, N+cHeightIncrease);
   Constraints.MinHeight:= N;
   Constraints.MaxHeight:= N;
   Height:= N;
@@ -1285,15 +1305,16 @@ var
   Ar: array of TATButton;
   N, i: integer;
 begin
-  SetLength(Ar, 8);
-  Ar[0]:= chkRegex;
-  Ar[1]:= chkCase;
-  Ar[2]:= chkWords;
-  Ar[3]:= chkWrap;
-  Ar[4]:= chkInSel;
-  Ar[5]:= chkMulLine;
-  Ar[6]:= bTokens;
-  Ar[7]:= chkHiAll;
+  Ar:= [
+    chkRegex,
+    chkCase,
+    chkWords,
+    chkWrap,
+    chkInSel,
+    chkMulLine,
+    bTokens,
+    chkHiAll
+    ];
 
   N:= 10; //indents left/right
   for i:= 0 to High(Ar) do
@@ -1585,4 +1606,3 @@ begin
 end;
 
 end.
-
