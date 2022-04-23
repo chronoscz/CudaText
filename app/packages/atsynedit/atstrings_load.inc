@@ -96,56 +96,158 @@ begin
   end;
 end;
 
-function DetectStreamEncodingByPythonId(Stream: TStream; var AEnc: TATFileEncoding; var AEncCodepage: TEncConvId): boolean;
-// https://docs.python.org/3/reference/lexical_analysis.html#encoding-declarations
+function FixEncodingNameByIANAStandart(const S: string): string;
+//correct some names according to this standard:
+// IANA Registered Character Sets
+// https://www.iana.org/assignments/character-sets/character-sets.xhtml
+begin
+  Result:= LowerCase(S);
+  Result:= StringReplace(Result, 'windows-', 'cp', []);
+  Result:= StringReplace(Result, 'ibm', 'cp', []);
+  Result:= StringReplace(Result, 'iso_', 'iso-', []);
+  Result:= StringReplace(Result, 'utf-8', 'utf8', []);
+  if (Result='us') or (Result='us-ascii') then //this maps to cp367 but Lazarus don't have it
+    Result:= 'cp437';
+end;
+
+function DetectStreamEncodingByXmlId(Stream: TStream; var AEnc: TATFileEncoding; var AEncCodepage: TEncConvId): boolean;
+//detect in XML files by signature <?xml version="1.0" encoding="ISO-8859-9"?>
 const
-  BufSize = 100;
-  cRegex = '^.+coding[=:]\s*([-\w.]+)';
-  cRegexGroup = 1;
+  cTagXML = '<?xml ';
+  cTagEnc = ' encoding="';
+var
+  Buf: array[0..70] of char;
+  TempEnc: TEncConvId;
+  S: string;
+  N: integer;
+begin
+  Result:= false;
+  FillChar(Buf, SizeOf(Buf), 0);
+  Stream.Position:= 0;
+  N:= Stream.Read(Buf, SizeOf(Buf)-1);
+  Stream.Position:= 0;
+  if N<=20 then exit;
+
+  SetString(S, Buf, N);
+  SDeleteFrom(S, #10);
+  SDeleteFrom(S, #13);
+
+  N:= Pos(cTagXML, S);
+  if N=0 then exit;
+  N:= Pos(cTagEnc, S);
+  if N=0 then exit;
+  Delete(S, 1, N-1+Length(cTagEnc));
+  SDeleteFrom(S, '"');
+
+  S:= FixEncodingNameByIANAStandart(S);
+
+  TempEnc:= EncConvFindEncoding(S);
+  case TempEnc of
+    eidUTF8,
+    eidUTF8BOM:
+      begin
+        AEnc:= cEncUTF8;
+        Result:= true;
+      end;
+    eidUCS2LE,
+    eidUCS2BE:
+      exit;
+    else
+      begin
+        AEnc:= cEncAnsi;
+        AEncCodepage:= TempEnc;
+        Result:= true;
+      end;
+  end;
+end;
+
+function DetectStreamEncodingByPythonId(Stream: TStream; var AEnc: TATFileEncoding; var AEncCodepage: TEncConvId): boolean;
+{
+https://docs.python.org/3/reference/lexical_analysis.html#encoding-declarations
+The recommended forms of an encoding expression are
+
+# -*- coding: <encoding-name> -*-
+
+which is recognized also by GNU Emacs, and
+
+# vim:fileencoding=<encoding-name>
+
+which is recognized by VIM.
+}
+  //
+  function IsLineComment(const S: string): boolean;
+  begin
+    Result:=
+      SBeginsWith(S, '#') or
+      SBeginsWith(S, ';') or
+      SBeginsWith(S, '//') or
+      SBeginsWith(S, '--');
+  end;
+  //
+  function GetEnc(const S: string): string;
+  var
+    N, N0, Len: integer;
+  begin
+    Result:= '';
+    N:= Pos('coding', S);
+    if N=0 then exit;
+    Len:= Length(S);
+    if N+8>Len then exit;
+    Inc(N, 6);
+    if not (S[N] in ['=', ':']) then exit;
+    Inc(N);
+    while (N<=Len) and (S[N]=' ') do Inc(N);
+    N0:= N;
+    while (N<=Len) and (S[N] in ['a'..'z', 'A'..'Z', '0'..'9', '-']) do Inc(N);
+    Result:= Copy(S, N0, N-N0);
+
+    Result:= FixEncodingNameByIANAStandart(Result);
+  end;
+  //
+const
+  cBufSize = 100;
+  cLineCount = 2; //detect by first 2 lines, 2nd used if 1st is comment
 var
   Buf, SLine, SEncId: string;
   Sep: TATStringSeparator;
   i: integer;
 begin
   Result:= false;
-  Buf:= StringOfChar(' ', BufSize);
+  Buf:= StringOfChar(' ', cBufSize);
   Stream.Position:= 0;
-  Stream.Read(Buf[1], Length(Buf));
-  Sep.Init(Buf, #10); //don't support CR separator yet
+  i:= Stream.Read(Buf[1], Length(Buf));
+  SetLength(Buf, i);
+  Stream.Position:= 0;
 
-  //detect by first 2 lines, 2nd used if 1st is comment
-  for i:= 1 to 2 do
-    if Sep.GetItemStr(SLine) then
+  Buf:= StringReplace(Buf, #13#10, #10, [rfReplaceAll]);
+  Buf:= StringReplace(Buf, #13, #10, [rfReplaceAll]);
+  Sep.Init(Buf, #10);
+
+  for i:= 0 to cLineCount-1 do
+  begin
+    Sep.GetItemStr(SLine);
+    if SLine='' then exit;
+    if not IsLineComment(SLine) then exit;
+    SEncId:= LowerCase(GetEnc(SLine));
+    if SEncId<>'' then
     begin
-      if SLine='' then exit;
-
-      //support several line comments, not all
-      if
-        not SBeginsWith(SLine, '#') and
-        not SBeginsWith(SLine, ';') and
-        not SBeginsWith(SLine, '//') and
-        not SBeginsWith(SLine, '--') then exit;
-
-      SEncId:= SFindRegexMatch(SLine, cRegex, cRegexGroup, false, false, false);
-      if SEncId<>'' then
-      begin
-        AEncCodepage:= EncConvFindEncoding(SEncId);
-        case AEncCodepage of
-          eidUTF8,
-          eidUTF8BOM,
-          eidUCS2LE,
-          eidUCS2BE:
-            begin
-              AEnc:= cEncUTF8;
-              AEncCodepage:= eidUTF8;
-            end
-          else
-            AEnc:= cEncAnsi;
-        end;
-        Result:= true;
-        exit;
+      AEncCodepage:= EncConvFindEncoding(SEncId);
+      case AEncCodepage of
+        eidUTF8,
+        eidUTF8BOM,
+        eidUCS2LE,
+        eidUCS2BE:
+          begin
+            AEnc:= cEncUTF8;
+            AEncCodepage:= eidUTF8;
+          end
+        else
+          AEnc:= cEncAnsi;
       end;
+      Result:= true;
+      exit;
     end;
+  end;
 end;
 
 procedure DetectStreamEncoding(Stream: TStream;
@@ -216,8 +318,13 @@ begin
         end;
     end;
 
-  if DetectStreamEncodingByPythonId(Stream, Enc, EncCodepage) then
-    Exit;
+  if ATEditorOptions.DetectEncodingByPythonSignature then
+    if DetectStreamEncodingByPythonId(Stream, Enc, EncCodepage) then
+      Exit;
+
+  if ATEditorOptions.DetectEncodingByXmlSignature then
+    if DetectStreamEncodingByXmlId(Stream, Enc, EncCodepage) then
+      Exit;
 
   if BufSizeUTF16>0 then
     if DetectStreamUtf16NoBom(Stream, BufSizeUTF16, IsLE) then
@@ -526,8 +633,8 @@ begin
     else
       FEncoding:= cEncAnsi;
     DetectStreamEncoding(Stream, FEncoding, FEncodingCodepage, NSignatureLen, bWithBom,
-      ATEditorOptions.DetectUtf8BufferKb,
-      ATEditorOptions.DetectUf16BufferWords);
+      ATEditorOptions.DetectUTF8BufferKb,
+      ATEditorOptions.DetectUTF16BufferWords);
   end
   else
   begin

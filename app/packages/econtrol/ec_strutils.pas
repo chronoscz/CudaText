@@ -40,13 +40,8 @@ function IsWordBreak(aPos: integer; const Text: UCString): Boolean;
 
 function ecUpCase(C: UCChar): UCChar; inline;
 procedure CharToUpCase(var C: UCChar); inline;
-function SkipSpacesAndBreaks(const Source: ecString; var APos: integer): integer;
-function SkipSpacesNoLineBreak(const Source: ecString; var APos: integer): integer;
-
-{
-function ecEncodeString(const S: string): string;
-function ecDecodeString(const S: string): string;
-}
+function SkipSpacesAndBreaks(const Source: ecString; var APos: integer): boolean;
+function SkipSpacesNoLineBreak(const Source: ecString; var APos: integer): boolean;
 
 implementation
 
@@ -178,78 +173,24 @@ begin
     Dec(C, 32);
 end;
 
-function SkipSpacesNoLineBreak(const Source: ecString; var APos: integer): integer;
-var N: integer;
+function SkipSpacesNoLineBreak(const Source: ecString; var APos: integer): boolean;
+//returns bool: reached end of buffer
+var NLen: integer;
 begin
-  Result := 0;
-  N := Length(Source);
-  while (APos <= N) and IsSpaceChar(Source[APos]) do // Alexey
-    inc(APos);
-  if APos > N then Result := -1;
+  NLen := Length(Source);
+  while (APos <= NLen) and IsSpaceChar(Source[APos]) do
+    Inc(APos);
+  Result := APos > NLen;
 end;
 
-function SkipSpacesAndBreaks(const Source: ecString; var APos: integer): integer;
-var N: integer;
+function SkipSpacesAndBreaks(const Source: ecString; var APos: integer): boolean;
+//returns bool: reached end of buffer
+var NLen: integer;
 begin
-  Result := 0;
-  N := Length(Source);
-  while (APos <= N) and IsSpaceOrBreakChar(Source[APos]) do // Alexey
-   begin
-    if Source[APos] = #10 then inc(Result);
-    inc(APos);
-   end;
-  if APos > N then Result := -1;
+  NLen := Length(Source);
+  while (APos <= NLen) and IsSpaceOrBreakChar(Source[APos]) do
+    Inc(APos);
+  Result := APos > NLen;
 end;
-
-function ecEncodeString(const S: string): string;
-var I, L, K: integer;
-begin
-  Result := '';
-  L := Length(S);
-  I := 1;
-  while I <= L do
-    if (S[I] >= ' ') and (S[I] <> '''') then
-     begin
-       K := I;
-       repeat
-         Inc(I)
-       until (I > L) or (S[I] < ' ') or (S[I] = '''');
-       Result := Result + '''' + Copy(S, K, I - K) + '''';
-     end else
-     begin
-      Result := Result + '#' + IntToStr(Ord(S[I]));
-      Inc(I);
-     end;
-end;
-
-function ecDecodeString(const S: string): string;
-var I, L, K: integer;
-begin
-  Result := '';
-  L := Length(S);
-  I := 1;
-  while I <= L do
-   if S[I] = '''' then
-     begin
-       K := I;
-       repeat
-         Inc(I);
-       until (I > L) or (S[i] = '''');
-       Result := Result + Copy(S, K + 1, I - K - 1);
-       Inc(I);
-     end else
-   if S[I] = '#' then
-     begin
-       K := I + 1;
-       repeat
-         Inc(I)
-       until (I > L) or not IsIdentDigitChar(S[I]);
-       if (K = I) or ((I - K) > 3) then
-         raise Exception.Create('Invalid character code');
-       Result := Result + Chr(StrToInt(Copy(S, K, I - K)));
-     end else Exit;
-//   else raise Exception.Create('Invalid property data');
-end;
-
 
 end.

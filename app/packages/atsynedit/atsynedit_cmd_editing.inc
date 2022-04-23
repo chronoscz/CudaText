@@ -54,7 +54,10 @@ begin
 
   try
     //bNeedGroup:= (Carets.Count>1) or (Carets.IsSelection);
-    bNeedGroup:= false; //CudaText issue #3274
+    bNeedGroup:= true;
+      //True - for CudaText issue #3972; all TextInsert commands will undo in 1 step because of IsCommandToUndoInOneStep()
+      //False - for CudaText issue #3274; but now True works too
+
     bInsertLinePerCaret:= false;
 
     if bNeedGroup then
@@ -208,6 +211,9 @@ begin
   if Carets.IsSelection then
   begin
     Result:= DoCommand_TextDeleteSelection;
+    //deletion of block by BkSpace needs undo-group, CudaText issue #3971
+    St.BeginUndoGroup;
+    St.EndUndoGroup;
     Exit
   end;
 
@@ -278,7 +284,12 @@ begin
     end;
 
   if bColBlock or Carets.IsSelection then
-    Result:= DoCommand_TextDeleteSelection
+  begin
+    Result:= DoCommand_TextDeleteSelection;
+    //deletion of block needs undo-group, CudaText issue #3971
+    Strings.BeginUndoGroup;
+    Strings.EndUndoGroup;
+  end
   else
     Result:= DoCommand_TextDeleteRight(1);
 end;
@@ -360,7 +371,10 @@ begin
   if Carets.IsSelection then
   begin
     Result:= DoCommand_TextDeleteSelection;
-    exit
+    //deletion of block needs undo-group, CudaText issue #3971
+    St.BeginUndoGroup;
+    St.EndUndoGroup;
+    Exit;
   end;
 
   bNeedGroup:= Carets.Count>1;
@@ -623,6 +637,10 @@ begin
   bChange:= false;
   St:= Strings;
 
+  //also make undo-group to fix CudaText issue #3971
+  St.BeginUndoGroup;
+  St.EndUndoGroup;
+
   bNeedGroup:= Carets.Count>1;
   if bNeedGroup then
     St.BeginUndoGroup;
@@ -690,6 +708,10 @@ begin
 
   if bNeedGroup then
     St.EndUndoGroup;
+
+  //also make undo-group to fix CudaText issue #3971
+  St.BeginUndoGroup;
+  St.EndUndoGroup;
 
   //cResultCaretLazy is to fix CudaText #3065
   if ANext then

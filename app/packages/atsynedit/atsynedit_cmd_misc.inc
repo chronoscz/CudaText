@@ -57,14 +57,14 @@ end;
 
 function TATSynEdit.DoCommand_ToggleLineNums: TATCommandResults;
 begin
-  with Gutter.Items[GutterBandNumbers] do
+  with Gutter.Items[FGutterBandNumbers] do
     Visible:= not Visible;
   Result:= [cResultState];
 end;
 
 function TATSynEdit.DoCommand_ToggleFolding: TATCommandResults;
 begin
-  with Gutter.Items[GutterBandFolding] do
+  with Gutter.Items[FGutterBandFolding] do
     Visible:= not Visible;
   Result:= [cResultState];
 end;
@@ -178,8 +178,10 @@ end;
 
 function TATSynEdit.DoCommand_FoldRangeAtCurLine(ACommand: TATEditorFoldRangeCommand): TATCommandResults;
 begin
-  DoFoldUnfoldRangeAtCurLine(ACommand);
-  Result:= [cResultCaretAny, cResultScroll, cResultFoldChange];
+  Result:= [];
+  //if Carets.Count<>1 then Exit; //we don't need this cmd for multi-carets
+  if DoFoldUnfoldRangeAtCurLine(ACommand) then
+    Result:= [cResultCaretAny, cResultScroll, cResultFoldChange];
 end;
 
 procedure TATSynEdit.UpdateFoldLineIndexer;

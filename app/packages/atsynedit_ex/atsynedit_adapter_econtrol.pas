@@ -47,7 +47,6 @@ type
     TATAdapterProgressKind = (epkFirst, epkSecond, epkBoth);
   private
     EdList: TFPList;
-    Buffer: TATStringBuffer;
     FRangesColored: TATSortedRanges;
     FRangesColoredBounds: TATSortedRanges;
     FRangesSublexer: TATSortedRanges;
@@ -83,6 +82,7 @@ type
     function GetTokenColorBG_FromMultiLineTokens(APos: TPoint;
       ADefColor: TColor; AEditorIndex: integer): TColor;
     function EditorRunningCommand: boolean;
+    procedure UpdateBufferFromEvent(Sender: TObject);
     procedure UpdateBuffer(ABuffer: TATStringBuffer);
     procedure UpdatePublicDataNeedTo;
     procedure UpdateRanges;
@@ -95,6 +95,7 @@ type
     function GetLexerSuportsDynamicHilite: boolean;
     function IsDynamicHiliteEnabled: boolean;
   public
+    Buffer: TATStringBuffer;
     AnClient: TecClientSyntAnalyzer;
     //
     constructor Create(AOwner: TComponent); override;
@@ -127,8 +128,6 @@ type
     //support for syntax-tree
     property TreeBusy: boolean read FBusyTreeUpdate;
     procedure TreeFill(ATree: TTreeView);
-    procedure __TreeGetPositionOfRange_EC(const R: TecTextRange; out APosBegin, APosEnd: TPoint);
-    function __TreeGetRangeOfPosition(APos: TPoint): TecTextRange; //unused function
 
     //sublexers
     function SublexerRangeCount: integer;
@@ -559,6 +558,7 @@ constructor TATAdapterEControl.Create(AOwner: TComponent);
 begin
   inherited;
 
+  ImplementsDataReady:= true;
   EdList:= TFPList.Create;
   AnClient:= nil;
   Buffer:= TATStringBuffer.Create;
@@ -810,17 +810,14 @@ var
   NLast, i: integer;
 begin
   Result:= nil;
-  NLast := AnClient.PublicData.FoldRanges.Count - 1;
+  NLast:= AnClient.PublicData.FoldRanges.Count - 1;
   for i:= Min(NLast, R.Index-1) downto 0 do
   begin
     RTest:= TecTextRange(AnClient.PublicData.FoldRanges[i]);
     if (RTest.StartIdx<=R.StartIdx) and
        (RTest.EndIdx>=R.EndIdx) and
        (RTest.Level<R.Level) then
-    begin
-      Result:= RTest;
-      Exit
-    end;
+      Exit(RTest);
   end;
 end;
 
@@ -839,6 +836,17 @@ begin
     if N.Text=ANodeText then Exit(N);
     N:= N.GetNextSibling;
   until false;
+end;
+
+function TreeFindNodeWithData(ATree: TTreeView; AData: pointer): TTreeNode;
+begin
+  //Result:= ATree.Items.FindNodeWithData(AData);
+  // this is very slow on big XML files.
+  // 3 Mb XML file: TreeFill takes 14 seconds, while with reverse search: only 2 seconds
+
+  Result:= ATree.Items.GetLastNode;
+  while Assigned(Result) and (Result.Data <> AData) do
+    Result:= Result.GetPrev;
 end;
 
 procedure TATAdapterEControl.TreeFill(ATree: TTreeView);
@@ -895,7 +903,7 @@ begin
       while (RangeParent<>nil) and (not RangeParent.Rule.DisplayInTree) do
         RangeParent:= GetRangeParent(RangeParent);
       if RangeParent<>nil then
-        NodeParent:= ATree.Items.FindNodeWithData(RangeParent);
+        NodeParent:= TreeFindNodeWithData(ATree, RangeParent);
 
       if NodeTextGroup<>'' then
       begin
@@ -952,46 +960,6 @@ begin
     ATree.Invalidate;
     FBusyTreeUpdate:= false;
     AnClient.CriSecForData.Leave;
-  end;
-end;
-
-procedure TATAdapterEControl.__TreeGetPositionOfRange_EC(const R: TecTextRange;
-  out APosBegin, APosEnd: TPoint);
-begin
-  APosBegin:= Point(-1, -1);
-  APosEnd:= Point(-1, -1);
-  if R=nil then exit;
-  if AnClient=nil then exit;
-
-  if R.StartIdx>=0 then
-    APosBegin:= AnClient.PublicData.Tokens._GetItemPtr(R.StartIdx)^.Range.PointStart;
-
-  if R.EndIdx>=0 then
-    APosEnd:=  AnClient.PublicData.Tokens._GetItemPtr(R.EndIdx)^.Range.PointEnd;
-end;
-
-//unused function
-function TATAdapterEControl.__TreeGetRangeOfPosition(APos: TPoint): TecTextRange;
-var
-  R: TecTextRange;
-  NTokenOrig: integer;
-  i: integer;
-begin
-  Result:= nil;
-  if AnClient=nil then exit;
-
-  NTokenOrig:= DoFindToken(APos);
-  if NTokenOrig<0 then exit;
-
-  //find last range, which contains our token
-  for i:= AnClient.PublicData.FoldRanges.Count-1 downto 0 do
-  begin
-    R:= TecTextRange(AnClient.PublicData.FoldRanges[i]);
-    if not R.Rule.DisplayInTree then Continue;
-
-    if (R.StartIdx<=NTokenOrig) and
-       (R.EndIdx>=NTokenOrig) then
-       exit(R);
   end;
 end;
 
@@ -1171,11 +1139,13 @@ begin
 
   if Assigned(AAnalizer) then
   begin
-    UpdateBuffer(Buffer);
+    Buffer.Valid:= false;
 
     AnClient:= TecClientSyntAnalyzer.Create(AAnalizer, Buffer);
     if EdList.Count>0 then
       AnClient.FileName:= ExtractFileName(Editor.FileName);
+
+    AnClient.OnUpdateBuffer:= @UpdateBufferFromEvent;
     AnClient.OnParseDone:= @ParseDone;
     AnClient.OnProgressFirst:= @ProgressFirst;
     AnClient.OnProgressSecond:= @ProgressSecond;
@@ -1491,6 +1461,12 @@ begin
     Result:= AnClient.PublicData.Tokens.PriorAt(AnClient.Buffer.CaretToStr(APos));
 end;
 
+procedure TATAdapterEControl.UpdateBufferFromEvent(Sender: TObject);
+begin
+  if Assigned(AnClient) then
+    UpdateBuffer(AnClient.Buffer);
+end;
+
 function TATAdapterEControl.GetLexer: TecSyntAnalyzer;
 begin
   if Assigned(AnClient) then
@@ -1502,8 +1478,7 @@ end;
 procedure TATAdapterEControl.DoChangeLog(Sender: TObject; ALine: integer);
 begin
   if AnClient=nil then Exit;
-  AnClient.Stop; //stop parsing before slow UpdateBuffer()
-  UpdateBuffer(Buffer);
+  AnClient.Stop;
   UpdatePublicDataNeedTo;
   AnClient.TextChangedOnLine(ALine);
 end;

@@ -22,7 +22,7 @@ uses
   ATCanvasPrimitives,
   ATStringProc,
   ATStrings,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_LineParts,
   ATSynEdit_CharSizer;
 
@@ -311,7 +311,7 @@ end;
 procedure CanvasUnprintedSpace(C: TCanvas; const ARect: TRect;
   AScale: integer; AFontColor: TColor);
 const
-  cMinDotSize = 2;
+  cMinDotSize = 1; //should be 1, VSCode paints unprinted-space as 1 pixel
 var
   R: TRect;
   NSize: integer;
@@ -607,8 +607,8 @@ procedure DoPaintUnprintedEndSymbol(C: TCanvas;
   const ACharSize: TATEditorCharSize;
   AColorFont, AColorBg: TColor);
 const
-  // https://www.fileformat.info/info/unicode/char/B6/index.htm
-  cPilcrowString: PChar = #$C2#$B6;
+  // https://www.compart.com/en/unicode/U+00B6
+  cPilcrowString: string = #$B6;
 begin
   case ATEditorOptions.UnprintedEndSymbol of
     aeueDot:
@@ -1262,4 +1262,3 @@ begin
 end;
 
 end.
-

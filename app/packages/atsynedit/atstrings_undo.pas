@@ -53,8 +53,10 @@ type
     procedure SetAsString(const AValue: string);
   public
     ItemTickCount: QWord; //from GetTickCount64
+
     ItemGlobalCounter: DWord; //several adjacent items, made by the same editor command, have the same GlobalCounter
                               //it's used for deleting old undo-items when MaxCount is reached
+
     ItemCommandCode: integer; //if not 0, all adjacent items with the same CommandCode will undo as a group
                               //it's used mainly for commands "move lines up/down", CudaText issue #3289
 
@@ -121,6 +123,11 @@ type
     function IsEmpty: boolean;
     property AsString: string read GetAsString write SetAsString;
     property NewCommandMark: boolean read FNewCommandMark write FNewCommandMark;
+      //NewCommandMark is set from ATSynEdit.DoCommand() or CudaText API.
+      //When it's set to True, Undo list increases GlobalCounter for the next added Undo item.
+      //All Undo items with the same GlobalCounter are performed by a single command or single CudaText API call.
+      //So they must be undone with a single undo action.
+      //Also, this allows Undo list to support MaxCount _complex actions_ in the list, intead of MaxCount simple items.
   end;
 
 

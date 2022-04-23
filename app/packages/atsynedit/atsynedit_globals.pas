@@ -2,7 +2,7 @@
 Copyright (C) Alexey Torgashin, uvviewsoft.com
 License: MPL 2.0 or LGPL
 }
-unit ATSynEdit_Options;
+unit ATSynEdit_Globals;
 
 {$mode objfpc}{$H+}
 {$ModeSwitch advancedrecords}
@@ -10,9 +10,9 @@ unit ATSynEdit_Options;
 interface
 
 uses
-  SysUtils,
+  SysUtils, Classes,
   LCLType, LCLIntf,
-  Graphics, Controls, Forms, Clipbrd;
+  Graphics, Controls, Forms, Menus, Clipbrd;
 
 type
   TATEditorUnptintedEolSymbol = (
@@ -28,14 +28,18 @@ type
   TATEditorOptions = record
   private
     FClipboardColumnFormat: TClipboardFormat;
+    FClipboardIndentFormat: TClipboardFormat;
   public const
     ProgressLoadChars = 1024*1024;
     ProgressSaveLines = 128*1024;
 
-    //set it to number of editors, which share same Strings obj
-    //(needed when UI tab is splitted to N parts, for the same file).
+    //set it to number of editors, which share the same Strings object
+    //needed when UI tab is splitted to N parts, for the same file.
     //set to 1 to allow only one editor for Strings obj (saves memory).
     MaxStringsClients = 2;
+
+    DashedLine_DashLen = 12;
+    DashedLine_EmptyLen = 4;
 
   public
     //force UTF8 for huge files on loading
@@ -45,8 +49,14 @@ type
     //smart update used only if lines changed, not deleted/inserted
     MaxUpdatesCountEasy: integer;
 
-    DetectUtf8BufferKb: integer;
-    DetectUf16BufferWords: integer;
+    MaxClipboardRecents: integer;
+    MaxClipboardRecentsMenuitemLen: integer;
+
+    UseGlobalCharSizer: boolean;
+    DetectUTF8BufferKb: integer;
+    DetectUTF16BufferWords: integer;
+    DetectEncodingByPythonSignature: boolean;
+    DetectEncodingByXmlSignature: boolean;
 
     ItalicFontLongerInPercents: integer;
     UnprintedTabCharLength: integer;
@@ -83,13 +93,19 @@ type
     TimerIntervalAutoScroll: integer;
     TimerIntervalNiceScroll: integer;
 
-    GutterBandsCount: integer;
     GutterSizeBookmarks: integer;
     GutterSizeNumbers: integer;
     GutterSizeFolding: integer;
     GutterSizeLineStates: integer;
-    GutterSizeSepar: integer;
+    GutterSizeSeparator: integer;
     GutterSizeEmpty: integer;
+
+    GutterTagBookmarks: Int64;
+    GutterTagNumbers: Int64;
+    GutterTagLineStates: Int64;
+    GutterTagFolding: Int64;
+    GutterTagSeparator: Int64;
+    GutterTagEmpty: Int64;
 
     UsePaintStatic: boolean;
     FoldedLenOfEmptyHint: integer;
@@ -131,7 +147,7 @@ type
 
     ClipboardColumnSignature: integer;
     function ClipboardColumnFormat: TClipboardFormat;
-
+    function ClipboardExFormat: TClipboardFormat;
   end;
 
 type
@@ -175,6 +191,24 @@ const
   crNiceScrollLeft  = TCursor(-43);
   crNiceScrollRight = TCursor(-44);
 
+type
+  TATEditorClipboardExData = record
+    CaretPos: TRect;
+    CaretCount: integer;
+    FirstLineIndentChars,
+    FirstLineIndentColumns: integer;
+    FileName: ShortString; //AnsiString is harder to read from OS
+    ModifiedVersion: QWord;
+    TickOnCopy: QWord;
+  end;
+
+function ATEditorGetClipboardExData(out AInfo: TATEditorClipboardExData): boolean;
+
+var
+  ATEditorClipboardRecents: TStringList = nil;
+  ATEditorClipboardRecentMenu: TPopupMenu = nil;
+
+
 implementation
 
 { TATEditorOptions }
@@ -184,6 +218,13 @@ begin
   if FClipboardColumnFormat=0 then
     FClipboardColumnFormat:= RegisterClipboardFormat('Application/X-ATSynEdit-Block');
   Result:= FClipboardColumnFormat;
+end;
+
+function TATEditorOptions.ClipboardExFormat: TClipboardFormat;
+begin
+  if FClipboardIndentFormat=0 then
+    FClipboardIndentFormat:= RegisterClipboardFormat('Application/X-ATSynEdit-Ex');
+  Result:= FClipboardIndentFormat;
 end;
 
 { TATEditorBitmaps }
@@ -283,6 +324,29 @@ begin
     Result:= AValue * ATEditorScaleFontPercents div 100;
 end;
 
+function ATEditorGetClipboardExData(out AInfo: TATEditorClipboardExData): boolean;
+var
+  Str: TMemoryStream;
+begin
+  Result:= false;
+  AInfo:= Default(TATEditorClipboardExData);
+  if Clipboard.HasFormat(ATEditorOptions.ClipboardExFormat) then
+  begin
+    Str:= TMemoryStream.Create;
+    try
+      Clipboard.GetFormat(ATEditorOptions.ClipboardExFormat, Str);
+      Str.Position:= 0;
+      if Str.Size>=SizeOf(AInfo) then
+      begin
+        Str.Read(AInfo, SizeOf(AInfo));
+        Result:= true;
+      end;
+    finally
+      FreeAndNil(Str);
+    end;
+  end;
+end;
+
 
 initialization
 
@@ -292,8 +356,14 @@ initialization
     MaxFileSizeMbToDetectEncoding:= 50;
     MaxUpdatesCountEasy:= 200;
 
-    DetectUtf8BufferKb:= 8;
-    DetectUf16BufferWords:= 5;
+    MaxClipboardRecents:= 0; //0 to disable
+    MaxClipboardRecentsMenuitemLen:= 60;
+
+    UseGlobalCharSizer:= true;
+    DetectUTF8BufferKb:= 8;
+    DetectUTF16BufferWords:= 5;
+    DetectEncodingByPythonSignature:= true;
+    DetectEncodingByXmlSignature:= true;
 
     ItalicFontLongerInPercents:= 40;
     UnprintedTabCharLength:= 1;
@@ -342,13 +412,19 @@ initialization
     TimerIntervalAutoScroll:= 100;
     TimerIntervalNiceScroll:= 100;
 
-    GutterBandsCount:= 6;
     GutterSizeBookmarks:= 16;
     GutterSizeNumbers:= 10;
     GutterSizeFolding:= 14;
     GutterSizeLineStates:= 3;
-    GutterSizeSepar:= 1;
+    GutterSizeSeparator:= 1;
     GutterSizeEmpty:= 2;
+
+    GutterTagBookmarks:= 1;
+    GutterTagNumbers:= 2;
+    GutterTagLineStates:= 3;
+    GutterTagFolding:= 4;
+    GutterTagSeparator:= 8;
+    GutterTagEmpty:= 9;
 
     UsePaintStatic:= true;
     FoldedLenOfEmptyHint:= 50;
@@ -398,6 +474,12 @@ initialization
   end;
 
 finalization
+
+  if Assigned(ATEditorClipboardRecents) then
+    FreeAndNil(ATEditorClipboardRecents);
+
+  if Assigned(ATEditorClipboardRecentMenu) then
+    FreeAndNil(ATEditorClipboardRecentMenu);
 
   with ATEditorBitmaps do
   begin

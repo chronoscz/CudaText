@@ -31,7 +31,7 @@ uses
   ATStrings,
   ATStringProc_WordJump,
   ATCanvasPrimitives,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_CharSizer,
   {$ifdef USE_FPC_REGEXPR}
   RegExpr,
@@ -389,7 +389,7 @@ type
 const
   cInitTextOffsetLeft = 0;
   cInitTextOffsetTop = 2;
-  cInitHighlightGitConflicts = true;
+  cInitHighlightGitConflicts = false;
   cInitAutoPairForMultiCarets = true;
   cInitInputNumberAllowNegative = true;
   cInitMaskChar = '*';
@@ -558,6 +558,7 @@ type
     FTabHelper: TATStringTabHelper;
     FAdapterHilite: TATAdapterHilite;
     FAdapterIME: TATAdapterIME;
+    FCharSizer: TATCharSizer;
     FFold: TATSynRanges;
     FFoldImageList: TImageList;
     FFoldStyle: TATEditorFoldStyle;
@@ -800,6 +801,7 @@ type
     FPaintStarted: boolean;
     FPaintWorking: boolean;
     FTickMinimap: QWord;
+    FTickInvalidate: QWord;
     FTickAll: QWord;
     FShowOsBarVert: boolean;
     FShowOsBarHorz: boolean;
@@ -1002,6 +1004,7 @@ type
     function DoCalcLineLen(ALineIndex: integer): integer;
     procedure DoChangeBookmarks;
     procedure DoHandleWheelRecord(const ARec: TATEditorWheelRecord);
+    procedure DoStringsOnUnfoldLine(Sender: TObject; ALine: integer);
     procedure FlushEditingChangeEx(AChange: TATLineChangeKind; ALine, AItemCount: integer);
     procedure FlushEditingChangeLog(ALine: integer);
     function GetActualDragDropIsCopying: boolean;
@@ -1020,8 +1023,10 @@ type
     function IsCaretOnVisibleRect: boolean;
     function IsInvalidateAllowed: boolean; inline;
     function IsNormalLexerActive: boolean;
+    procedure MenuitemClipboardRecentsClick(Sender: TObject);
     procedure SetEditorIndex(AValue: integer);
     procedure SetOptScaleFont(AValue: integer);
+    procedure UpdateClipboardRecents(const AText: string);
     procedure UpdateGapForms(ABeforePaint: boolean);
     procedure UpdateAndWait(AUpdateWrapInfo: boolean; APause: integer);
     procedure SetFoldingAsString(const AValue: string);
@@ -1301,6 +1306,7 @@ type
     procedure SetUndoLimit(AValue: integer);
     procedure SetWrapMode(AValue: TATEditorWrapMode);
     procedure SetWrapIndented(AValue: boolean);
+    procedure UpdateGutterBandIndexes;
     procedure UpdateScrollbarVert;
     procedure UpdateScrollbarHorz;
     procedure UpdateSelRectFromPoints(const P1, P2: TPoint);
@@ -1368,7 +1374,7 @@ type
     function DoCommand_SelectInverted: TATCommandResults;
     function DoCommand_SelectSplitToLines: TATCommandResults;
     function DoCommand_SelectExtendByLine(AUp: boolean): TATCommandResults;
-    function DoCommand_Cancel(AKeepLast, AKeepSel: boolean): TATCommandResults;
+    function DoCommand_Cancel(AKeepLastCaret, AKeepSelection: boolean): TATCommandResults;
     function DoCommand_ToggleReadOnly: TATCommandResults;
     function DoCommand_ToggleOverwrite: TATCommandResults;
     function DoCommand_ToggleWordWrap(AltOrder: boolean): TATCommandResults;
@@ -1416,9 +1422,12 @@ type
     function DoCommand_GotoTextBegin: TATCommandResults;
     function DoCommand_GotoTextEnd: TATCommandResults;
     function DoCommand_ClipboardPaste(AKeepCaret, ASelectThen: boolean;
-      AClipboardObject: TClipboard): TATCommandResults;
+      AClipboardHasColumnBlock: boolean; const AClipboardText: string): TATCommandResults;
     function DoCommand_ClipboardPasteColumnBlock(AKeepCaret: boolean;
-      AClipboardObject: TClipboard): TATCommandResults;
+      const AClipboardText: string): TATCommandResults;
+    function DoCommand_ClipboardPasteAndIndent: TATCommandResults;
+    function DoCommand_ClipboardPasteFromRecents: TATCommandResults;
+    function DoCommand_ClipboardClearRecents: TATCommandResults;
     function DoCommand_ClipboardCopy(Append: boolean;
       AClipboardObject: TClipboard): TATCommandResults;
     function DoCommand_ClipboardCut(
@@ -1441,6 +1450,7 @@ type
     property MouseNiceScroll: boolean read GetMouseNiceScroll write SetMouseNiceScroll;
     property ShowOsBarVert: boolean read FShowOsBarVert write SetShowOsBarVert;
     property ShowOsBarHorz: boolean read FShowOsBarHorz write SetShowOsBarHorz;
+    procedure InvalidateEx(AForceRepaint, AForceOnScroll: boolean);
 
   public
     TagString: string; //to store plugin specific data in CudaText
@@ -1468,8 +1478,7 @@ type
     property ClientHeight: integer read FClientH;
     //updates
     procedure Invalidate; override;
-    procedure InvalidateEx(AForceRepaint, AForceOnScroll: boolean);
-    procedure Update(AUpdateWrapInfo: boolean=false); reintroduce;
+    procedure Update(AUpdateWrapInfo: boolean=false; AForceRepaint: boolean=false; AForceOnScroll: boolean=false); reintroduce;
     procedure UpdateWrapInfo(AForceUpdate: boolean=false);
     procedure UpdateFoldedFromLinesHidden;
     procedure UpdateScrollInfoFromSmoothPos(var AInfo: TATEditorScrollInfo; const APos: Int64);
@@ -1550,13 +1559,15 @@ type
     property Gutter: TATGutter read FGutter;
     property GutterDecor: TATGutterDecor read GetGutterDecor;
     property GutterDecorAlignment: TAlignment read FGutterDecorAlignment write FGutterDecorAlignment;
-    property GutterBandBookmarks: integer read FGutterBandBookmarks write FGutterBandBookmarks;
-    property GutterBandNumbers: integer read FGutterBandNumbers write FGutterBandNumbers;
-    property GutterBandStates: integer read FGutterBandStates write FGutterBandStates;
-    property GutterBandFolding: integer read FGutterBandFolding write FGutterBandFolding;
-    property GutterBandSeparator: integer read FGutterBandSeparator write FGutterBandSeparator;
-    property GutterBandEmpty: integer read FGutterBandEmpty write FGutterBandEmpty;
-    property GutterBandDecor: integer read FGutterBandDecor write FGutterBandDecor;
+    {
+    property GutterBandBookmarks: integer read FGutterBandBookmarks;
+    property GutterBandNumbers: integer read FGutterBandNumbers;
+    property GutterBandStates: integer read FGutterBandStates;
+    property GutterBandFolding: integer read FGutterBandFolding;
+    property GutterBandSeparator: integer read FGutterBandSeparator;
+    property GutterBandEmpty: integer read FGutterBandEmpty;
+    property GutterBandDecor: integer read FGutterBandDecor;
+    }
     //files
     property FileName: string read FFileName write FFileName;
     procedure LoadFromFile(const AFilename: string; AKeepScroll: boolean=false); virtual;
@@ -1622,7 +1633,7 @@ type
     procedure DoRangeHideLines(ALineFrom, ALineTo: integer); inline;
     procedure DoFoldForLevel(ALevel: integer);
     procedure DoFoldForLevelEx(ALevel: integer; AOuterRange: integer);
-    procedure DoFoldUnfoldRangeAtCurLine(AOp: TATEditorFoldRangeCommand);
+    function DoFoldUnfoldRangeAtCurLine(AOp: TATEditorFoldRangeCommand): boolean;
     property FoldingAsString: string read GetFoldingAsString write SetFoldingAsString;
     property FoldingAsStringTodo: string read FFoldingAsStringTodo write FFoldingAsStringTodo;
     //markers
@@ -2065,6 +2076,7 @@ procedure EditorOpenLink(const S: string);
 
 procedure InitEditorMouseActions(out M: TATEditorMouseActions; ANoCtrlClickForCaret: boolean);
 
+function HandleMouseDownToHandleExtraMouseButtons(Ctl: TCustomControl; Button: TMouseButton; Shift: TShiftState): boolean;
 
 implementation
 
@@ -2201,11 +2213,34 @@ end;
 
 procedure TATSynEdit.UpdateGutterAutosize;
 var
-  Str: string;
+  NCnt, NLen, NBandIndex: integer;
 begin
-  Str:= IntToStr(Max(10, Strings.Count));
-  FGutter[FGutterBandNumbers].Size:=
-    Length(Str)*FCharSize.XScaled div ATEditorCharXScale + 2*FNumbersIndent;
+  NCnt:= Strings.Count;
+
+  if NCnt>=1000000000 then NLen:= 10
+  else
+  if NCnt>=100000000 then NLen:= 9
+  else
+  if NCnt>=10000000 then NLen:= 8
+  else
+  if NCnt>=1000000 then NLen:= 7
+  else
+  if NCnt>=100000 then NLen:= 6
+  else
+  if NCnt>=10000 then NLen:= 5
+  else
+  if NCnt>=1000 then NLen:= 4
+  else
+  if NCnt>=100 then NLen:= 3
+  else
+    NLen:= 2;
+
+  if FOptNumbersStyle=cNumbersRelative then //add space for '-'
+    Inc(NLen);
+
+  NBandIndex:= FGutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers);
+  FGutter[NBandIndex].Size:=
+    NLen*FCharSize.XScaled div ATEditorCharXScale + 2*FNumbersIndent;
   FGutter.Update;
 end;
 
@@ -2335,7 +2370,7 @@ begin
   if FRectMain.Width=0 then
     UpdateInitialVars(Canvas);
 
-  GlobalCharSizer.Init(Font.Name, DoScaleFont(Font.Size));
+  FCharSizer.Init(Font.Name, DoScaleFont(Font.Size));
 
   //virtual mode allows faster usage of WrapInfo
   CurStrings:= Strings;
@@ -2968,7 +3003,7 @@ begin
     exit
   end;
 
-  Gutter.GutterLeft:= R.Left;
+  Gutter.GutterCoordLeft:= R.Left;
   Gutter.Update;
 end;
 
@@ -2987,11 +3022,14 @@ begin
 end;
 
 procedure TATSynEdit.GetRectGutterNumbers(out R: TRect);
+var
+  NBand: integer;
 begin
-  if FOptGutterVisible and FGutter[FGutterBandNumbers].Visible then
+  NBand:= FGutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers);
+  if FOptGutterVisible and FGutter[NBand].Visible then
   begin
-    R.Left:= FGutter[FGutterBandNumbers].Left;
-    R.Right:= FGutter[FGutterBandNumbers].Right;
+    R.Left:= FGutter[NBand].Left;
+    R.Right:= FGutter[NBand].Right;
     R.Top:= FRectGutter.Top;
     R.Bottom:= FRectGutter.Bottom;
   end
@@ -3000,11 +3038,14 @@ begin
 end;
 
 procedure TATSynEdit.GetRectGutterBookmarks(out R: TRect);
+var
+  NBand: integer;
 begin
-  if FOptGutterVisible and FGutter[FGutterBandBookmarks].Visible then
+  NBand:= FGutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks);
+  if FOptGutterVisible and FGutter[NBand].Visible then
   begin
-    R.Left:= FGutter[FGutterBandBookmarks].Left;
-    R.Right:= FGutter[FGutterBandBookmarks].Right;
+    R.Left:= FGutter[NBand].Left;
+    R.Right:= FGutter[NBand].Right;
     R.Top:= FRectGutter.Top;
     R.Bottom:= FRectGutter.Bottom;
   end
@@ -3021,6 +3062,7 @@ end;
 procedure TATSynEdit.UpdateInitialVars(C: TCanvas);
 begin
   UpdateClientSizes;
+  UpdateGutterBandIndexes;
 
   C.Font.Name:= Font.Name;
   C.Font.Size:= DoScaleFont(Font.Size);
@@ -3558,11 +3600,13 @@ begin
   if IsFoldLineNeededBeforeWrapitem(AWrapIndex) then
   begin
     NCoordSep:= ARectLine.Top-1;
-    C.Pen.Color:= Colors.CollapseLine;
-    CanvasLineHorz(C,
+    CanvasLineHorz_Dashed(C,
+      Colors.CollapseLine,
       ARectLine.Left+FFoldUnderlineOffset,
       NCoordSep,
-      ARectLine.Right-FFoldUnderlineOffset
+      ARectLine.Right-FFoldUnderlineOffset,
+      ATEditorOptions.DashedLine_DashLen,
+      ATEditorOptions.DashedLine_EmptyLen
       );
   end;
 
@@ -4469,14 +4513,18 @@ begin
 end;
 
 constructor TATSynEdit.Create(AOwner: TComponent);
-var
-  i: integer;
 begin
   inherited;
 
-  //GlobalCharSizer should be created after MainForm is inited
-  if not Assigned(GlobalCharSizer) then
-    GlobalCharSizer:= TATCharSizer.Create(AOwner);
+  if ATEditorOptions.UseGlobalCharSizer then
+  begin
+    //GlobalCharSizer should be created after MainForm is inited
+    if GlobalCharSizer=nil then
+      GlobalCharSizer:= TATCharSizer.Create(AOwner);
+    FCharSizer:= GlobalCharSizer;
+  end
+  else
+    FCharSizer:= TATCharSizer.Create(Self);
 
   Caption:= '';
   ControlStyle:= ControlStyle+[csOpaque, csDoubleClicks, csTripleClicks];
@@ -4549,7 +4597,7 @@ begin
   FCaretStopUnfocused:= true;
   FCaretHideUnfocused:= true;
 
-  FTabHelper:= TATStringTabHelper.Create;
+  FTabHelper:= TATStringTabHelper.Create(FCharSizer);
   FMarkers:= nil;
   FAttribs:= nil;
   FMarkedRange:= nil;
@@ -4620,6 +4668,7 @@ begin
   FStringsInt.OnChangeLog:= @DoStringsOnChangeLog;
   FStringsInt.OnUndoBefore:= @DoStringsOnUndoBefore;
   FStringsInt.OnUndoAfter:= @DoStringsOnUndoAfter;
+  FStringsInt.OnUnfoldLine:=@DoStringsOnUnfoldLine;
 
   FFold:= TATSynRanges.Create;
   FFoldStyle:= cInitFoldStyle;
@@ -4702,27 +4751,15 @@ begin
   FOptGutterIcons:= cGutterIconsPlusMinus;
 
   FGutterDecorAlignment:= taCenter;
-  FGutterBandBookmarks:= 0;
-  FGutterBandNumbers:= 1;
-  FGutterBandStates:= 2;
-  FGutterBandFolding:= 3;
-  FGutterBandSeparator:= 4;
-  FGutterBandEmpty:= 5;
   FGutterBandDecor:= -1;
 
-  for i:= 1 to ATEditorOptions.GutterBandsCount do
-    FGutter.Add(10);
-  FGutter[FGutterBandBookmarks].Size:= ATEditorOptions.GutterSizeBookmarks;
-  FGutter[FGutterBandBookmarks].Scaled:= true;
-  FGutter[FGutterBandNumbers].Size:= ATEditorOptions.GutterSizeNumbers;
-  FGutter[FGutterBandStates].Size:= ATEditorOptions.GutterSizeLineStates;
-  FGutter[FGutterBandStates].Scaled:= true;
-  FGutter[FGutterBandFolding].Size:= ATEditorOptions.GutterSizeFolding;
-  FGutter[FGutterBandFolding].Scaled:= true;
-  FGutter[FGutterBandSeparator].Size:= ATEditorOptions.GutterSizeSepar;
-  FGutter[FGutterBandEmpty].Size:= ATEditorOptions.GutterSizeEmpty;
-  FGutter[FGutterBandSeparator].Visible:= false;
-  FGutter.Update;
+  FGutter.Add(-1, ATEditorOptions.GutterSizeBookmarks,  ATEditorOptions.GutterTagBookmarks,  true, true);
+  FGutter.Add(-1, ATEditorOptions.GutterSizeNumbers,    ATEditorOptions.GutterTagNumbers,    false, true);
+  FGutter.Add(-1, ATEditorOptions.GutterSizeLineStates, ATEditorOptions.GutterTagLineStates, true, true);
+  FGutter.Add(-1, ATEditorOptions.GutterSizeFolding,    ATEditorOptions.GutterTagFolding,    true, true);
+  FGutter.Add(-1, ATEditorOptions.GutterSizeSeparator,  ATEditorOptions.GutterTagSeparator,  false, false);
+  FGutter.Add(-1, ATEditorOptions.GutterSizeEmpty,      ATEditorOptions.GutterTagEmpty,      false, true);
+  UpdateGutterBandIndexes;
 
   FOptNumbersAutosize:= true;
   FOptNumbersAlignment:= taRightJustify;
@@ -5009,7 +5046,7 @@ begin
   inherited;
 end;
 
-procedure TATSynEdit.Update(AUpdateWrapInfo: boolean=false);
+procedure TATSynEdit.Update(AUpdateWrapInfo: boolean=false; AForceRepaint: boolean=false; AForceOnScroll: boolean=false);
 begin
   if not IsRepaintEnabled then exit;
 
@@ -5018,7 +5055,7 @@ begin
   if AUpdateWrapInfo then
     FWrapUpdateNeeded:= true;
 
-  Invalidate;
+  InvalidateEx(AForceRepaint, AForceOnScroll);
 end;
 
 procedure TATSynEdit.SetFocus;
@@ -5891,6 +5928,8 @@ begin
   SetFocus;
   DoCaretForceShow;
 
+  if HandleMouseDownToHandleExtraMouseButtons(Self, Button, Shift) then exit;
+
   FMouseDownCoordOriginal.X:= X;
   FMouseDownCoordOriginal.Y:= Y;
   FMouseDownCoord.X:= X + FScrollHorz.TotalOffset;
@@ -5965,7 +6004,8 @@ begin
           end;
         mcaPaste:
           begin
-            //don't set caret pos here, user needs to press middle-btn on any place to paste
+            //set caret to the clicked position, like Kate and VSCode do:
+            DoCaretSingle(PosTextClicked.X, PosTextClicked.Y);
             DoCommand(cCommand_ClipboardAltPaste, cInvokeInternal); //uses PrimarySelection:TClipboard
           end;
         mcaGotoDefinition:
@@ -6056,7 +6096,7 @@ begin
   begin
     if ActionId=cMouseActionClickSimple then
     begin
-      Index:= FGutter.IndexAt(X);
+      Index:= FGutter.FindIndexAtCoordX(X);
       if Index=FGutterBandNumbers then
       begin
         if FOptMouseClickNumberSelectsLine then
@@ -6073,7 +6113,7 @@ begin
       end
       else
         //click on other bands- event
-        DoEventClickGutter(FGutter.IndexAt(X), PosTextClicked.Y);
+        DoEventClickGutter(FGutter.FindIndexAtCoordX(X), PosTextClicked.Y);
     end;
   end;
 
@@ -6221,7 +6261,7 @@ begin
   else
   if FOptGutterVisible and PtInRect(FRectGutter, Point(X, Y)) then
   begin
-    Index:= FGutter.IndexAt(X);
+    Index:= FGutter.FindIndexAtCoordX(X);
     if Index=FGutterBandBookmarks then
       if Assigned(FMenuGutterBm) then FMenuGutterBm.PopUp;
     if Index=FGutterBandNumbers then
@@ -6825,12 +6865,17 @@ begin
   if not IsRepaintEnabled then exit;
   //if not IsInvalidateAllowed then exit;
 
-  if not AForceRepaint then
+  if Assigned(AdapterForHilite) and
+    AdapterForHilite.ImplementsDataReady and
+    not AForceRepaint then
   begin
     if ATEditorOptions.FlickerReducingPause>=1000 then
+      //value 1000 is the special value of CudaText option "renderer_anti_flicker"
     begin
-      if Assigned(AdapterForHilite) then
-        if not AdapterForHilite.IsDataReadyPartially then exit;
+      if not AdapterForHilite.IsDataReadyPartially then
+      begin
+        exit;
+      end;
     end
     else
     if ATEditorOptions.FlickerReducingPause>0 then
@@ -8257,60 +8302,88 @@ begin
 end;
 
 procedure TATSynEdit.DoPaintGutterDecor(C: TCanvas; ALine: integer; const ARect: TRect);
+  //
+  procedure PaintDecorItem(var Decor: TATGutterDecorItem);
+  var
+    Style, StylePrev: TFontStyles;
+    Ext: TSize;
+    NText, NImageIndex: integer;
+    bPaintIcon: boolean;
+  begin
+    NImageIndex:= Decor.Data.ImageIndex;
+    bPaintIcon:= Assigned(FGutterDecorImages) and (NImageIndex>=0);
+
+    //paint decor text
+    if Decor.Data.Text<>'' then
+    begin
+      C.Font.Color:= Decor.Data.TextColor;
+      Style:= [];
+      if Decor.Data.TextBold then
+        Include(Style, fsBold);
+      if Decor.Data.TextItalic then
+        Include(Style, fsItalic);
+      StylePrev:= C.Font.Style;
+      C.Font.Style:= Style;
+
+      Ext:= C.TextExtent(Decor.Data.Text);
+      C.Brush.Color:= FColorGutterBG;
+
+      case FGutterDecorAlignment of
+        taCenter:
+          NText:= (ARect.Left+ARect.Right-Ext.cx) div 2;
+        taLeftJustify:
+          NText:= ARect.Left;
+        taRightJustify:
+          NText:= ARect.Right-Ext.cx;
+      end;
+
+      C.Brush.Style:= bsClear;
+      C.TextOut(
+        NText,
+        (ARect.Top+ARect.Bottom-Ext.cy) div 2,
+        Decor.Data.Text
+        );
+      C.Font.Style:= StylePrev;
+      C.Brush.Style:= bsSolid;
+    end
+    else
+    //paint decor icon
+    if bPaintIcon then
+    begin
+      if (NImageIndex>=0) and (NImageIndex<FGutterDecorImages.Count) then
+        FGutterDecorImages.Draw(C,
+          (ARect.Left+ARect.Right-FGutterDecorImages.Width) div 2,
+          (ARect.Top+ARect.Bottom-FGutterDecorImages.Height) div 2,
+          NImageIndex
+          );
+    end
+    else
+    //fill cell background
+    begin
+      C.Brush.Style:= bsSolid;
+      C.Brush.Color:= Decor.Data.TextColor;
+      C.FillRect(ARect);
+    end;
+  end;
+  //
 var
-  Decor: TATGutterDecorItem;
-  Style, StylePrev: TFontStyles;
-  Ext: TSize;
-  N, NText: integer;
+  Decor: PATGutterDecorItem;
+  NItem: integer;
 begin
   if FGutterDecor=nil then exit;
-  N:= FGutterDecor.Find(ALine);
-  if N<0 then exit;
-  Decor:= FGutterDecor[N];
+  NItem:= FGutterDecor.Find(ALine);
+  if NItem<0 then exit;
 
-  //paint decor text
-  if Decor.Data.Text<>'' then
+  //paint first found item
+  Decor:= FGutterDecor.ItemPtr(NItem);
+  PaintDecorItem(Decor^);
+
+  //paint next item, if first one is background-filler
+  if Decor^.IsBackgroundFill and FGutterDecor.IsIndexValid(NItem+1) then
   begin
-    C.Font.Color:= Decor.Data.TextColor;
-    Style:= [];
-    if Decor.Data.TextBold then
-      Include(Style, fsBold);
-    if Decor.Data.TextItalic then
-      Include(Style, fsItalic);
-    StylePrev:= C.Font.Style;
-    C.Font.Style:= Style;
-
-    Ext:= C.TextExtent(Decor.Data.Text);
-    C.Brush.Color:= FColorGutterBG;
-
-    case FGutterDecorAlignment of
-      taCenter:
-        NText:= (ARect.Left+ARect.Right-Ext.cx) div 2;
-      taLeftJustify:
-        NText:= ARect.Left;
-      taRightJustify:
-        NText:= ARect.Right-Ext.cx;
-    end;
-
-    C.Brush.Style:= bsClear;
-    C.TextOut(
-      NText,
-      (ARect.Top+ARect.Bottom-Ext.cy) div 2,
-      Decor.Data.Text
-      );
-    C.Font.Style:= StylePrev;
-  end
-  else
-  //paint decor icon
-  if Assigned(FGutterDecorImages) then
-  begin
-    N:= Decor.Data.ImageIndex;
-    if (N>=0) and (N<FGutterDecorImages.Count) then
-      FGutterDecorImages.Draw(C,
-        (ARect.Left+ARect.Right-FGutterDecorImages.Width) div 2,
-        (ARect.Top+ARect.Bottom-FGutterDecorImages.Height) div 2,
-        N
-        );
+    Decor:= FGutterDecor.ItemPtr(NItem+1);
+    if Decor^.Data.LineNum=ALine then
+      PaintDecorItem(Decor^);
   end;
 end;
 
@@ -8666,6 +8739,9 @@ begin
     exit;
   end;
 
+  if FRegexLinks=nil then exit;
+  if not FRegexLinks.IsCompiled then exit;
+
   St:= Strings;
   NLineStart:= LineTop;
   NLineEnd:= NLineStart+GetVisibleLines;
@@ -8746,7 +8822,8 @@ begin
   Result:= '';
   if not Strings.IsIndexValid(AY) then exit;
 
-  Assert(Assigned(FRegexLinks), 'FRegexLinks not inited');
+  if FRegexLinks=nil then exit;
+  if not FRegexLinks.IsCompiled then exit;
   FRegexLinks.InputString:= Strings.Lines[AY];
   MatchPos:= 0;
   MatchLen:= 0;
@@ -9543,10 +9620,8 @@ begin
     FRegexLinks.ModifierI:= false; //I not needed to find links
     FRegexLinks.Expression:= FOptShowURLsRegex{%H-};
     FRegexLinks.Compile;
-
     Result:= true;
   except
-    exit;
   end;
 end;
 
@@ -9734,6 +9809,20 @@ begin
     OptShowCurLine:= OldOption;
 end;
 
+procedure TATSynEdit.DoStringsOnUnfoldLine(Sender: TObject; ALine: integer);
+var
+  N: integer;
+begin
+  N:= Fold.FindRangeWithPlusAtLine(ALine);
+  if N>=0 then
+    if Fold.Items[N].Folded then
+    begin
+      DoRangeUnfold(N);
+      UpdateWrapInfo(true); //without this, WrapInfo is not updated somehow
+    end;
+end;
+
+
 procedure TATSynEdit.ActionAddJumpToUndo;
 var
   St: TATStrings;
@@ -9854,20 +9943,40 @@ begin
   end;
 end;
 
-{
-procedure TATSynEdit.DoHandleWheelQueue;
-var
-  Rec: TATEditorWheelRecord;
+procedure TATSynEdit.UpdateGutterBandIndexes;
 begin
-  while FWheelQueue.Size()>0 do
-  begin
-    Rec:= FWheelQueue.Front;
-    FWheelQueue.Pop();
-    DoHandleWheelRecord(Rec);
+  FGutterBandBookmarks:= FGutter.FindIndexByTag(ATEditorOptions.GutterTagBookmarks);
+  FGutterBandNumbers:=   FGutter.FindIndexByTag(ATEditorOptions.GutterTagNumbers);
+  FGutterBandStates:=    FGutter.FindIndexByTag(ATEditorOptions.GutterTagLineStates);
+  FGutterBandFolding:=   FGutter.FindIndexByTag(ATEditorOptions.GutterTagFolding);
+  FGutterBandSeparator:= FGutter.FindIndexByTag(ATEditorOptions.GutterTagSeparator);
+  FGutterBandEmpty:=     FGutter.FindIndexByTag(ATEditorOptions.GutterTagEmpty);
+end;
+
+type
+  TCustomControlHack = class(TCustomControl);
+
+function HandleMouseDownToHandleExtraMouseButtons(Ctl: TCustomControl; Button: TMouseButton; Shift: TShiftState): boolean;
+var
+  NewKey: word;
+begin
+  case Button of
+    mbExtra1:
+      begin
+        NewKey:= VK_BROWSER_BACK;
+        TCustomControlHack(Ctl).KeyDown(NewKey, Shift);
+        Result:= true;
+      end;
+    mbExtra2:
+      begin
+        NewKey:= VK_BROWSER_FORWARD;
+        TCustomControlHack(Ctl).KeyDown(NewKey, Shift);
+        Result:= true;
+      end;
+    else
+      Result:= false;
   end;
 end;
-}
-
 
 {$I atsynedit_carets.inc}
 {$I atsynedit_hilite.inc}
@@ -9900,4 +10009,3 @@ initialization
   {$endif}
 
 end.
-

@@ -32,6 +32,7 @@ type
   TATGutterDecorItem = record
     Data: TATGutterDecorData;
     procedure Init(const AData: TATGutterDecorData);
+    function IsBackgroundFill: boolean;
     class operator =(const a, b: TATGutterDecorItem): boolean;
   end;
 
@@ -60,8 +61,9 @@ type
     function Count: integer; inline;
     function IsIndexValid(N: integer): boolean; inline;
     property Items[N: integer]: TATGutterDecorItem read GetItem write SetItem; default;
+    function ItemPtr(N: integer): PATGutterDecorItem; inline;
     procedure Add(const AData: TATGutterDecorData);
-    function Find(ALineNum: integer): integer;
+    function Find(ALineNum: integer; AInsertionIndex: boolean=false): integer;
     procedure DeleteDups;
     procedure Update(AChange: TATLineChangeKind; ALine, AItemCount, ALineCount: integer);
   end;
@@ -80,6 +82,11 @@ end;
 procedure TATGutterDecorItem.Init(const AData: TATGutterDecorData);
 begin
   Data:= AData;
+end;
+
+function TATGutterDecorItem.IsBackgroundFill: boolean;
+begin
+  Result:= (Data.Text='') and (Data.ImageIndex=-1);
 end;
 
 class operator TATGutterDecorItem.=(const a, b: TATGutterDecorItem): boolean;
@@ -154,34 +161,50 @@ begin
   Result:= (N>=0) and (N<FList.Count);
 end;
 
+function TATGutterDecor.ItemPtr(N: integer): PATGutterDecorItem;
+begin
+  Result:= FList.ItemPtr(N);
+end;
+
 procedure TATGutterDecor.Add(const AData: TATGutterDecorData);
 var
-  Item: TATGutterDecorItem;
-  nLine, i: integer;
+  NewItem: TATGutterDecorItem;
+  bBackfillerOld, bBackfillerNew: boolean;
+  i: integer;
 begin
-  Item.Init(AData);
+  NewItem.Init(AData);
 
-  for i:= 0 to Count-1 do
+  i:= Find(AData.LineNum, true{AInsertionIndex});
+  if not IsIndexValid(i) then
   begin
-    nLine:= FList.ItemPtr(i)^.Data.LineNum;
-
-    //item already exists: overwrite
-    if nLine=AData.LineNum then
+    FList.Add(NewItem);
+  end
+  else
+  begin
+    //2 items can exist for the same line-number.
+    //make sure we put background-filler item to lower index.
+    if ItemPtr(i)^.Data.LineNum=AData.LineNum then
     begin
-      Items[i]:= Item;
-      Exit
-    end;
-
-    //found item for bigger line: insert before it
-    if nLine>AData.LineNum then
-    begin
-      FList.Insert(i, Item);
-      Exit;
-    end;
+      bBackfillerOld:= ItemPtr(i)^.IsBackgroundFill;
+      bBackfillerNew:= NewItem.IsBackgroundFill;
+      if bBackfillerOld<>bBackfillerNew then
+      begin
+        if bBackfillerNew then
+          FList.Insert(i, NewItem)
+        else
+        begin
+          if IsIndexValid(i+1) and (ItemPtr(i+1)^.Data.LineNum=AData.LineNum) then
+            FList[i+1]:= NewItem
+          else
+            FList.Insert(i+1, NewItem);
+        end;
+      end
+      else
+        Items[i]:= NewItem;
+    end
+    else
+      FList.Insert(i, NewItem);
   end;
-
-  //not found item for bigger line: append
-  FList.Add(Item);
 end;
 
 procedure TATGutterDecor.DeleteDups;
@@ -198,7 +221,8 @@ begin
   end;
 end;
 
-function TATGutterDecor.Find(ALineNum: integer): integer;
+function TATGutterDecor.Find(ALineNum: integer; AInsertionIndex: boolean=false): integer;
+//AInsertionIndex: find index to insert new item with ALineNum
 var
   a, b, m, dif: integer;
 begin
@@ -207,12 +231,25 @@ begin
   b:= Count-1;
 
   repeat
-    if a>b then exit;
+    if a>b then
+    begin
+      if AInsertionIndex then
+        exit(a)
+      else
+        exit(-1);
+    end;
     m:= (a+b+1) div 2;
 
     dif:= FList.ItemPtr(m)^.Data.LineNum-ALineNum;
+
     if dif=0 then
+    begin
+      //support several items for the same line number: return first of them
+      while (m>0) and (FList.ItemPtr(m-1)^.Data.LineNum=ALineNum) do
+        Dec(m);
       exit(m);
+    end;
+
     if dif>0 then
       b:= m-1
     else

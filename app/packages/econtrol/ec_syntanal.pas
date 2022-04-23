@@ -11,6 +11,7 @@
 { *************************************************************************** }
 
 {$mode delphi}
+{.$define debug_ExtractTag_time}
 
 unit ec_SyntAnal;
 
@@ -32,6 +33,7 @@ uses
 type
   TecLineBreakPos = (lbTop, lbBottom);
   TecLineBreakBound = set of TecLineBreakPos;
+  TecRangeLineRelation = (rlrBeforeLine, rlrTouchesLine, rlrAfterLine);
 
   TecSyntAnalyzer       = class;
   TecParserResults      = class;
@@ -152,6 +154,8 @@ type
     CondStartPos: integer;    // End pos of the end condition
     FinalSubAnalyzer: TecSyntAnalyzer;
     class operator =(const a, b: TecSubLexerRange): boolean;
+    function RelationToLine(ALine: integer): TecRangeLineRelation;
+    procedure Reopen;
   end;
 
 // *******************************************************************
@@ -497,7 +501,8 @@ type
     FBuffer: TATStringBuffer;
     FOwner: TecSyntAnalyzer;
     FFinished: Boolean;
-    FPrevChangeLine: integer;
+    FChangeAtLine: integer; //first changed line in editor; -1: not inited yet
+    FChangeOccured: boolean;
     FSubLexerBlocks: TecSubLexerRanges;
     FTagList: TecTokenList;
     FCurState: integer;
@@ -509,7 +514,6 @@ type
     function ExtractTag(var FPos: integer; ADisableFolding: Boolean): Boolean;
     function GetTags(Index: integer): PecSyntToken;
     function GetSubLexerRangeCount: integer;
-    function BufferInvalidated: Boolean; inline;
 
     //moved to 'private' by Alexey, not needed in CudaText
     property TagCount: integer read GetTokenCount;
@@ -536,8 +540,6 @@ type
     procedure ShowTokenIndexer; //Alexey
     procedure ShowCmtIndexer; //Alexey
   public
-    BufferVersion: integer;
-
     //holds index of first token overlapping that i-th line ("overlapping" is for multi-line tokens)
     TokenIndexer: array of integer; //Alexey
     //holds booleans: first token of i-th line is a 'comment'
@@ -563,10 +565,10 @@ type
   { TecParserThread }
 
   TecParserThread = class(TThread)
+  private
+    procedure ThreadUpdateBuffer;
   public
     An: TecClientSyntAnalyzer;
-    DebugMsg: string;
-    DebugTicks: QWord;
     procedure ThreadParseDone;
     procedure ThreadProgressFirst;
     procedure ThreadProgressSecond;
@@ -636,6 +638,7 @@ type
     FOnProgressFirst: TNotifyEvent;
     FOnProgressSecond: TNotifyEvent;
     FOnProgressBoth: TNotifyEvent;
+    FOnUpdateBuffer: TNotifyEvent;
 
     procedure UpdateFirstLineOfChange(var ALine: integer);
     function CheckBracketsAreClosed(ATokenIndexFrom, ATokenIndexTo: integer): boolean; //Alexey
@@ -678,6 +681,7 @@ type
     property OnProgressFirst: TNotifyEvent read FOnProgressFirst write FOnProgressFirst;
     property OnProgressSecond: TNotifyEvent read FOnProgressSecond write FOnProgressSecond;
     property OnProgressBoth: TNotifyEvent read FOnProgressBoth write FOnProgressBoth;
+    property OnUpdateBuffer: TNotifyEvent read FOnUpdateBuffer write FOnUpdateBuffer;
 
     procedure DoParseDone;
     procedure DoProgressFirst;
@@ -752,7 +756,7 @@ type
   private
     FDeleted: Boolean; //Alexey
     FClientList: TFPList;
-    FMasters: TFPList;      // Master lexer, i.e. lexers that uses it
+    FMasters: TFPList; // master lexers, i.e. lexers that use it
     FOnChange: TNotifyEvent;
     FSampleText: TStrings;
     FFormats: TecStylesCollection;
@@ -863,6 +867,7 @@ type
     SpecialKinds: array of boolean; //Alexey: holds True for each TokenKind for indent-based folding
     IndentBasedFolding: boolean; //Alexey
     AppliedSyntaxTheme: string; //Alexey
+    AppliedStylesMap: boolean; //Alexey, for CudaLister
 
     CommentRangeBegin: string;
     CommentRangeEnd: string;
@@ -1012,8 +1017,12 @@ var
 implementation
 
 uses
-  SysUtils, Forms, Dialogs,
-  Math;
+  SysUtils, Forms, Dialogs, Math;
+
+const
+  //all lexers which need indent-based folding, must have this value
+  //in range-rules 'Group index' field
+  cIndentBasedFoldingGrpIndex = 20;
 
 {
 const
@@ -1046,8 +1055,8 @@ function _IndentOfBuffer(S: PWideChar; Len: integer): Integer; inline; // Alexey
 var
   i: integer;
 begin
-  Result:= 0;
-  for i:= 0 to Len-1 do
+  Result := 0;
+  for i := 0 to Len-1 do
   begin
     case S^ of
       ' ':
@@ -1071,9 +1080,19 @@ begin
   RE.ModifierR := False;
 end;
 
-function IsCharSurrogateHigh(ch: WideChar): boolean; inline; // Alexey
+function IsCharSurrogateHigh(ch: WideChar): boolean; inline;
 begin
   Result := (Ord(ch) >= $D800) and (Ord(ch) <= $DBFF);
+end;
+
+function _IsCharSpaceOrEol(ch: WideChar): boolean; inline;
+begin
+  case ch of
+    ' ', #10:
+      Result := True;
+    else
+      Result := False;
+  end;
 end;
 
 { TecParserThread }
@@ -1098,15 +1117,21 @@ begin
   An.DoProgressBoth;
 end;
 
+procedure TecParserThread.ThreadUpdateBuffer;
+begin
+  if Assigned(An.OnUpdateBuffer) then
+    An.OnUpdateBuffer(nil);
+end;
+
 procedure _LogException(E: Exception);
 var
   f: System.Text;
   fn: string;
 begin
   {$ifdef windows}
-  fn:= ExtractFileDir(Application.ExeName)+'\cudatext.error';
+  fn := ExtractFileDir(Application.ExeName)+'\cudatext.error';
   {$else}
-  fn:= GetEnvironmentVariable('HOME')+'/cudatext.error';
+  fn := GetEnvironmentVariable('HOME')+'/cudatext.error';
   {$endif}
 
   AssignFile(f, fn);
@@ -1126,59 +1151,68 @@ end;
 procedure TecParserThread.Execute;
 var
   Res: TecParseInThreadResult;
-  SavedChangeLine: integer;
 begin
-  try
+  repeat
+    if Terminated then Exit;
+    if Application.Terminated then Exit;
+
+    // set PublicData.Finished*, even if we didn't actually finished parsing,
+    // to avoid ATSynEdit.Invalidate being blocked
+    An.PublicData.Finished := True;
+    An.PublicData.FinishedPartially := True;
+
+    //constant in WaitFor() affects how fast 'Close all tabs' will run
+    if An.EventParseNeeded.WaitFor(100)<>wrSignaled then
+      Continue;
+
+    An.EventParseIdle.ResetEvent;
+    //Synchronize(DummyProc); //otherwise editor is not highlighted
+
     repeat
       if Terminated then Exit;
       if Application.Terminated then Exit;
 
-      // set PublicData.Finished*, even if we didn't actually finished parsing,
-      // to avoid ATSynEdit.Invalidate being blocked
-      An.PublicData.Finished := True;
-      An.PublicData.FinishedPartially := True;
-
-      //constant in WaitFor() affects how fast 'Close all tabs' will run
-      if An.EventParseNeeded.WaitFor(100)<>wrSignaled then
-        Continue;
-
-      An.EventParseIdle.ResetEvent;
       try
-        //Synchronize(DummyProc); //otherwise editor is not highlighted
-
-        //this repeat/until is needed to avoid having broken PublicData, when eprInterrupted occurs
-        SavedChangeLine := An.FPrevChangeLine;
-        repeat
-          Res := An.ParseInThread;
-          if Res in [eprNormal, eprAppTerminated] then Break;
-          An.FPrevChangeLine := SavedChangeLine;
-        until False;
-
-      finally
-        if not Terminated and not Application.Terminated then
+        An.FChangeOccured := False;
+        Synchronize(ThreadUpdateBuffer);
+        Res := An.ParseInThread;
+      except
+        on E: Exception do
         begin
-          Synchronize(ThreadParseDone);
+          _LogException(E);
+          Res := eprBufferInvalidated;
         end;
+      end;
 
-        An.EventParseIdle.SetEvent;
+      case Res of
+        eprNormal:
+          begin
+            if An.FChangeOccured then
+              Continue
+            else
+              Break;
+          end;
+        eprAppTerminated:
+          Break;
+        eprBufferInvalidated:
+          Continue;
       end;
     until False;
 
-  except
-    on E: Exception do
-      _LogException(E);
-  end;
+    if not Terminated and not Application.Terminated then
+      Synchronize(ThreadParseDone);
+
+    An.EventParseIdle.SetEvent;
+  until False;
 end;
 
 procedure TecParserThread.ShowDebugMsg;
 begin
-  Application.MainForm.Caption:= Format('%s, file %s, %dms, %d tokens, %d ranges', [
-      DebugMsg,
-      An.FileName,
-      DebugTicks,
-      An.PublicData.Tokens.Count,
-      An.PublicData.FoldRanges.Count
-      ]);
+  Application.MainForm.Caption := Format('file "%s",  %d tokens, %d ranges', [
+    An.FileName,
+    An.PublicData.Tokens.Count,
+    An.PublicData.FoldRanges.Count
+    ]);
 end;
 
 procedure TecParserThread.DummyProc;
@@ -1192,6 +1226,26 @@ class operator TecSubLexerRange.=(const a, b: TecSubLexerRange): boolean;
 begin
   Result := False;
 end;
+
+function TecSubLexerRange.RelationToLine(ALine: integer): TecRangeLineRelation;
+begin
+  if Range.PointStart.Y > ALine then
+    Result := rlrAfterLine
+  else
+  if Range.PointEnd.Y < ALine then
+    Result := rlrBeforeLine
+  else
+    Result := rlrTouchesLine;
+end;
+
+procedure TecSubLexerRange.Reopen;
+begin
+  Range.EndPos := -1;
+  Range.PointEnd.X := -1;
+  Range.PointEnd.Y := -1;
+  CondEndPos := -1;
+end;
+
 
 { TecSyntToken }
 
@@ -1313,12 +1367,10 @@ begin
     if FCondType = tcSkip then Exit;
     if not Result then
     case FCondType of
-      tcStrictMask, tcMask, tcEqual: Exit;
+      tcStrictMask, tcMask, tcEqual:
+        Exit;
       tcNotEqual:
-        begin
-          Result := True;
-          Exit;
-        end;
+        Exit(True);
     end;
    end;
   if FTagList.Count > 0 then
@@ -1362,7 +1414,9 @@ begin
        if FCondType = tcNotEqual then
          Result := not Result;
      end;
-   end else Result := FCondType <> tcNotEqual;
+   end
+  else
+    Result := FCondType <> tcNotEqual;
 end;
 
 constructor TecSingleTagCondition.Create(Collection: TCollection);
@@ -1407,7 +1461,7 @@ begin
   if FRegexes = nil then
   begin
     FRegexes := TFPObjectList.Create(True);
-    for i:= 0 to FTagList.Count - 1 do
+    for i := 0 to FTagList.Count - 1 do
     begin
       ReObj := TecRegExpr.Create;
       ReObj.Expression := FTagList[i];
@@ -2275,7 +2329,7 @@ begin
   FOwner.FClientList.Add(Self);
   FCurState := 0;
   FStateChanges := TecStateChanges.Create;
-  FPrevChangeLine := -1;
+  FChangeAtLine := -1;
 end;
 
 destructor TecParserResults.Destroy;
@@ -2295,14 +2349,14 @@ begin
   FCurState := 0;
   TokenIndexer := nil;
   CmtIndexer := nil;
-  FPrevChangeLine := -1;
+  FChangeAtLine := -1;
 end;
 
 function TecParserResults.Finished: Boolean;
 begin
   Result := True;
   FFinished := True;
-  FPrevChangeLine := -1;
+  FChangeAtLine := -1; //fix CudaText issue #4068, reset FChangeAtLine on parsing ending
 
   // Performs Gramma parsing
   //AnalyzeGramma;
@@ -2410,8 +2464,8 @@ begin
   Len1 := T1.Range.EndPos - St1;
   Len2 := T2.Range.EndPos - St2;
 
-  Ptr1:= @FBuffer.FText[St1+1];
-  Ptr2:= @FBuffer.FText[St2+1];
+  Ptr1 := @FBuffer.FText[St1+1];
+  Ptr2 := @FBuffer.FText[St2+1];
 
   // allow to compare "Id" with Id, and 'Id' with Id
   // ie skip quotes; needed for Bash lexer HereDoc
@@ -2624,11 +2678,13 @@ end;
 procedure TecParserResults.SaveState;
 var b: Boolean;
     Item: TecStateChange;
+    NStateCount: integer;
 begin
- if FStateChanges.Count = 0 then
+ NStateCount := FStateChanges.Count;
+ if NStateCount = 0 then
    b := FCurState <> 0
  else
-   b := FCurState <> FStateChanges.Last.State;
+   b := FCurState <> FStateChanges._GetItemPtr(NStateCount-1)^.State;
  if b then
  begin
    Item.TokenCount := FTagList.Count;
@@ -2738,7 +2794,7 @@ var
     own := FOwner;
     for i := FSubLexerBlocks.Count - 1 downto 0 do
      begin
-       Sub:= FSubLexerBlocks.InternalGet(i);
+       Sub := FSubLexerBlocks.InternalGet(i);
        if FPos > Sub.Range.StartPos then
         if Sub.Range.EndPos = -1 then
           begin
@@ -2857,51 +2913,69 @@ var
        sub.Range.StartPos := FPos - 1
      else
        sub.Range.StartPos := FPos + N - 1;
-     sub.Range.EndPos := -1;
      sub.Range.PointStart := FBuffer.StrToCaret(sub.Range.StartPos);
-     sub.CondEndPos := -1;
+     sub.Reopen;
      FSubLexerBlocks.Add(sub);
    end;
 
-   procedure TryOpenSubLexer;
+   function TryOpenSubLexer: boolean;
    var i: integer;
        Rule: TecSubAnalyzerRule;
    begin
+     Result := False;
      for i := 0 to own.SubAnalyzers.Count - 1 do
-      if CanOpen(own.SubAnalyzers[i]) then Exit;
+     begin
+       Rule := own.SubAnalyzers[i];
+       if CanOpen(Rule) then Exit(True);
+     end;
      if own <> FOwner then
-      for i := 0 to FOwner.SubAnalyzers.Count - 1 do
-      begin
-       Rule := FOwner.SubAnalyzers[i];
-       if Rule.AlwaysEnabled and CanOpen(Rule) then Exit;
-      end;
+       for i := 0 to FOwner.SubAnalyzers.Count - 1 do
+       begin
+         Rule := FOwner.SubAnalyzers[i];
+         if Rule.AlwaysEnabled and CanOpen(Rule) then Exit(True);
+       end;
    end;
 
 var
-  N, NNextPos: integer;
+  bEnded: boolean;
+  NNextPos: integer;
 begin
   Source := FBuffer.FText;
   GetOwner;
   if own=nil then
     raise EParserError.Create('GetOwner=nil');
-  TryOpenSubLexer;
+
+  // we had 2 calls of TryOpenSublexer, but this first one is not needed
+  //TryOpenSubLexer;
+
   if own.SkipSpaces then
-    begin
-     if own.ParseEndOfLine then N := SkipSpacesNoLineBreak(Source, FPos)
-      else N := SkipSpacesAndBreaks(Source, FPos);
-    end
-   else if FPos > Length(Source) then N := -1 else N := 0;
+  begin
+    if own.ParseEndOfLine then
+      bEnded := SkipSpacesNoLineBreak(Source, FPos)
+    else
+      bEnded := SkipSpacesAndBreaks(Source, FPos);
+  end
+  else
+    bEnded := FPos > Length(Source);
+
+  Result := bEnded;
+  if Result then Exit;
+
   TryOpenSubLexer;
   GetOwner;
   if own=nil then
     raise EParserError.Create('GetOwner=nil');
 
-  Result := N = -1;
-  if Result then Exit;
-
   CurToken := FOwner.GetToken(Self, Source, FPos, own <> FOwner);
+  if not Buffer.Valid then
+    Exit;
   if (own <> FOwner) and (CurToken.Range.StartPos < 0) then
+  begin
     CurToken := own.GetToken(Self, Source, FPos, False);
+    if not Buffer.Valid then
+      Exit;
+  end;
+
   if CurToken.Range.StartPos < 0 then  // no token
    begin
      NNextPos := FPos;
@@ -2988,14 +3062,21 @@ begin
 end;
 
 procedure TecParserResults.RestoreState;
-var i, NCount: integer;
+var
+  NCount, NTagCount, i: integer;
+  StatePtr: PecStateChange;
 begin
   NCount := 0;
+  NTagCount := TagCount;
+
   for i := FStateChanges.Count - 1 downto 0 do
-    if FStateChanges[i].TokenCount >= TagCount then
+  begin
+    StatePtr := FStateChanges._GetItemPtr(i);
+    if StatePtr^.TokenCount >= NTagCount then
       Inc(NCount)
     else
       Break;
+  end;
 
   if NCount > 0 then
     FStateChanges.DeleteRange(FStateChanges.Count-NCount, FStateChanges.Count-1);
@@ -3020,11 +3101,6 @@ begin
      end;
    end;
    Result := 0;
-end;
-
-function TecParserResults.BufferInvalidated: Boolean; inline;
-begin
-  Result := BufferVersion <> Buffer.Version;
 end;
 
 { TecClientSyntAnalyzer }
@@ -3054,7 +3130,7 @@ end;
 
 destructor TecClientSyntAnalyzer.Destroy;
 begin
-  FBuffer.IncreaseVersion;
+  FBuffer.Valid := False;
   ParserThread.Terminate;
   ParserThread.WaitFor;
   FreeAndNil(ParserThread);
@@ -3076,11 +3152,11 @@ procedure TecClientSyntAnalyzer.Stop;
 begin
   if not IsFinished then
   begin
-    FBuffer.IncreaseVersion;
+    FBuffer.Valid := False;
     Sleep(15);
   end;
   FFinished := True;
-  //FPrevChangeLine := -1; //this causes CudaText issue #3410
+  //FChangeAtLine := -1; //this causes CudaText issue #3410
 end;
 
 procedure TecClientSyntAnalyzer.Clear;
@@ -3165,8 +3241,7 @@ begin
              if Assigned(Owner.OnCloseTextRange) then
                Owner.OnCloseTextRange(Self, Range, StartIdx, EndIdx);
              FOpenedBlocks.Delete(j);
-             Result := True;
-             Exit;
+             Exit(True);
            end;
        end;
   end;
@@ -3187,10 +3262,7 @@ begin
             Dec(i);
           repeat
             if i < 0 then
-              begin
-                Result := False;
-                Exit;
-              end;
+              Exit(False);
             prn := TecTextRange(FOpenedBlocks[i]).Rule;
             Dec(i);
           until not prn.IgnoreAsParent;
@@ -3236,7 +3308,7 @@ begin
      end;
   end;
 
-  if BufferInvalidated then
+  if not FBuffer.Valid then
   begin
     FOpenedBlocks.Clear;
     Exit(False);
@@ -3375,16 +3447,14 @@ var
   own: TecSyntAnalyzer;
   bSeparateBlocks: boolean;
   bDisableFolding: boolean;
+  bEnded: boolean;
   NPos, NTemp, NTagCount, iToken: integer;
-{
-const
-  ProgressMinPos = 2000;
-  ProcessMsgStep1 = 1000; //stage1: finding tokens
-  ProcessMsgStep2 = 1000; //stage2: finding ranges
-}
+  {$ifdef debug_ExtractTag_time}
+  tick: QWord;
+  {$endif}
 begin
   Result := eprNormal;
-  BufferVersion := Buffer.Version;
+  FBuffer.Valid := True;
   FFinished := False;
   ClearDataOnChange;
 
@@ -3400,7 +3470,7 @@ begin
 
   repeat
     if FFinished then
-      Exit;
+      Exit(eprNormal);
 
     if Application.Terminated then
       Exit(eprAppTerminated);
@@ -3408,14 +3478,30 @@ begin
     if FBuffer = nil then
       Exit(eprBufferInvalidated);
 
-    if BufferInvalidated then
+    if not FBuffer.Valid then
       Exit(eprBufferInvalidated);
 
     NTemp := GetLastPos;
     if NTemp > NPos then
       NPos := NTemp;
 
-    if ExtractTag(NPos, bDisableFolding) then
+    {$ifdef debug_ExtractTag_time}
+    tick := GetTickCount64;
+    {$endif}
+
+    bEnded := ExtractTag(NPos, bDisableFolding);
+
+    {$ifdef debug_ExtractTag_time}
+    tick := GetTickCount64-tick;
+    if tick>500 then
+    begin
+      Writeln('Long getting: '+IntToStr(tick)+' msec for token:');
+      Writeln('  str: '+TagStr[TagCount-1]);
+      Writeln('  style name: '+Tags[TagCount-1].Rule.StyleName);
+    end;
+    {$endif}
+
+    if bEnded then
     begin
       //all tokens found, now find blocks (if bSeparateBlocks)
       if bSeparateBlocks then
@@ -3432,7 +3518,7 @@ begin
           if Application.Terminated then
             Exit(eprAppTerminated);
 
-          if BufferInvalidated then
+          if not FBuffer.Valid then
             Exit(eprBufferInvalidated);
         end;
       end;
@@ -3443,6 +3529,9 @@ begin
     end
     else
     begin
+      if not FBuffer.Valid then
+        Exit(eprBufferInvalidated);
+
       //this works when parsing has reached the ed's LineBottom,
       //it updates not-complete PublicData
       UpdatePublicData(False);
@@ -3473,6 +3562,7 @@ end;
 
 procedure TecClientSyntAnalyzer.ClearSublexerRangesFromLine(ALine: integer);
 var
+  Sub: PecSubLexerRange;
   NIndex: integer;
 begin
   if ALine = 0 then
@@ -3485,60 +3575,52 @@ begin
   if NIndex >= 0 then
     FSubLexerBlocks.ClearFromIndex(NIndex);
 
-  (*
-  for i := FSubLexerBlocks.Count - 1 downto 0 do
+  for NIndex := FSubLexerBlocks.Count - 1 downto 0 do
   begin
-    Sub := FSubLexerBlocks.InternalGet(i);
-    if ALine <= Sub.Range.PointStart.Y then
-    begin
-      Pnt := Buffer.StrToCaret(Sub.CondStartPos);
-      if ALine > Pnt.Y then
-         ALine := Pnt.Y;
-      FSubLexerBlocks.Delete(i); // remove sublexer block
-    end
-    else
-    begin
-      Pnt := Buffer.StrToCaret(Sub.CondEndPos);
-      if ALine < Pnt.Y then
-      begin
-        if ALine > Sub.Range.PointEnd.Y then
-          ALine := Sub.Range.PointEnd.Y;
-        Sub.Range.EndPos := -1; // open sublexer block
-        Sub.CondEndPos := -1;
-        //FSubLexerBlocks[i] := Sub; // no need to write back, we use pointer
-      end;
-    end;
+    Sub := FSubLexerBlocks.InternalGet(NIndex);
+    if Sub^.RelationToLine(ALine)=rlrTouchesLine then
+      Sub^.Reopen;
   end;
-  *)
 end;
 
 procedure TecClientSyntAnalyzer.UpdateFirstLineOfChange(var ALine: integer);
 var
-  Sub: PecSubLexerRange;
-  NSublexCount, N: integer;
+  Sub, Sub2: PecSubLexerRange;
+  N, NTempIndex: integer;
 begin
   if ALine = 0 then Exit;
 
   //change in sublexer range? get position of that range start. CudaText issue #3882.
   //to support command 'duplicate line' at the end of sublexer range, e.g. in Markdown lexer with fenced blocks.
-  NSublexCount := FSubLexerBlocks.Count;
-  if NSublexCount > 0 then
+  if FSubLexerBlocks.Count > 0 then
   begin
     N := FSubLexerBlocks.FindFirstContainingLine(ALine);
     if N >= 0 then
     begin
       Sub := FSubLexerBlocks.InternalGet(N);
+      Sub^.Reopen;
 
-      // delete sublexer range, decrease ALine
-      ALine := Sub.Range.PointStart.Y;
-      FSubLexerBlocks.ClearFromIndex(N);
+      // in PHP blocks / in Markdown fenced blocks, sublexer ranges are duplicated after editing
+      // so we must delete 'duplicates'
+      if N+1 < FSubLexerBlocks.Count then
+      begin
+        Sub2 := FSubLexerBlocks.InternalGet(N+1);
+        if Sub2.Range.PointStart = Sub.Range.PointStart then
+          FSubLexerBlocks.Delete(N+1);
+      end;
 
-      {
-      // just mark sublexer range as opened
-      // it's bad: in Markdown fenced blocks, sublexer ranges are duplicated after editing
-      Sub.Range.EndPos := -1;
-      Sub.CondEndPos := -1;
-      }
+      // open sub-lexer ranges nested into N-th range and also containing ALine
+      // CudaText issue #3973
+      for NTempIndex := N+1 to FSubLexerBlocks.Count-1 do
+      begin
+        Sub := FSubLexerBlocks.InternalGet(NTempIndex);
+        case Sub^.RelationToLine(ALine) of
+          rlrAfterLine:
+            Break;
+          rlrTouchesLine:
+            Sub^.Reopen;
+        end;
+      end;
     end;
   end;
 end;
@@ -3562,30 +3644,43 @@ procedure TecClientSyntAnalyzer.ClearDataOnChange;
  procedure UpdateFoldRangesOnChange(ATagCount: integer);
  var
    R: TecTextRange;
-   NDelta: integer;
-   i: integer;
+   NDelta, NTagCountMinusDelta: integer;
+   iRange: integer;
  begin
    //delta>0 was added for Python: editing below the block end must enlarge that block to include the new text.
    //but delta>0 breaks HTML lexer: on editing in any place,
-   //            text in <p>text text</p> changes styles to "misspelled tag property".
+   //            text in '<p>texttext</p>' changes style to "misspelled tag property".
    if Owner.IndentBasedFolding then
      NDelta := 4
    else
      NDelta := 0;
 
-   for i := FRanges.Count - 1 downto 0 do
+   for iRange := FRanges.Count - 1 downto 0 do
    begin
-     R := TecTextRange(FRanges[i]);
-     if (R.FCondIndex >= ATagCount) or (R.StartIdx >= ATagCount) then
-       FRanges.Delete(i)
-     else
-     if (R.FEndCondIndex >= ATagCount - NDelta) or
-        (R.EndIdx >= ATagCount - NDelta) then
+     R := TecTextRange(FRanges[iRange]);
+
+     if (R.FCondIndex >= ATagCount) or
+        (R.StartIdx >= ATagCount) then
      begin
-       //makes range opened: set ending to -1, add to FOpenedBlocks
-       R.EndIdx := -1;
-       R.FEndCondIndex := -1;
-       FOpenedBlocks.Add(R);
+       FRanges.Delete(iRange);
+     end
+     else
+     begin
+       //even if lexer has indent-based folding, some ranges may be different,
+       //e.g. ranges made by AutoFoldComments
+       if R.Rule.GroupIndex = cIndentBasedFoldingGrpIndex then
+         NTagCountMinusDelta := Max(0, ATagCount - NDelta)
+       else
+         NTagCountMinusDelta := ATagCount;
+
+       if (R.FEndCondIndex >= NTagCountMinusDelta) or
+          (R.EndIdx >= NTagCountMinusDelta) then
+       begin
+         //reopen range: set ending to -1, add to FOpenedBlocks
+         R.EndIdx := -1;
+         R.FEndCondIndex := -1;
+         FOpenedBlocks.Add(R);
+       end;
      end;
    end;
  end;
@@ -3593,8 +3688,8 @@ procedure TecClientSyntAnalyzer.ClearDataOnChange;
 var
   NLine, NTokenIndex, NTagCount: integer;
 begin
-  if FPrevChangeLine < 0 then Exit;
-  NLine := FPrevChangeLine;
+  if FChangeAtLine < 0 then Exit;
+  NLine := FChangeAtLine;
   NTokenIndex := -1;
 
   if NLine > 0 then
@@ -3616,7 +3711,10 @@ begin
     FRanges.Clear;
     FLastAnalPos := 0;
     FStartSepRangeAnal := 0;
-    RestoreState;
+
+    FStateChanges.Clear; //faster than RestoreState
+    FCurState := 0;
+
     UpdatePublicDataOnTextChange;
     Exit
   end;
@@ -3914,6 +4012,42 @@ begin
   idx := 0;
   Result := FmtStr;
   if Range=nil then Exit;
+
+  //special handling for CSS lexer
+  if FmtStr='CSS' then
+  begin
+    Result := '';
+    to_idx := Range.StartPos;
+    i := to_idx;
+    repeat
+      case Buffer.FText[i] of
+        '{', '}',
+        '>', // support <?php> tag
+        '/': // support CSS comments, but comment must not be in the middle of node name
+          Break;
+        #10:
+          begin
+            // if EOL is at to_idx position, only skip it; ie support this:
+            //   tagname
+            //   {
+            //   ...
+            //   }
+            if i<>to_idx then
+              Break;
+          end;
+      end;
+      Dec(i);
+      if i<1 then Break;
+    until False;
+
+    // strip trailing space/EOL
+    while (to_idx>0) and _IsCharSpaceOrEol(Buffer.FText[to_idx]) do
+      Dec(to_idx);
+
+    Result := Copy(Buffer.FText, i+1, to_idx-i);
+    Exit;
+  end;
+
   //try //Alexey: why try/except here?
 
    // HAW: obsolete -> to_idx := Length(Result);
@@ -4176,13 +4310,14 @@ begin
   if ALine < 0 then
     ALine := 0;
 
-  if FPrevChangeLine < 0 then
-    FPrevChangeLine := ALine
+  FChangeOccured := True;
+  if FChangeAtLine < 0 then
+    FChangeAtLine := ALine
   else
-    FPrevChangeLine := Min(FPrevChangeLine, ALine);
+    FChangeAtLine := Min(FChangeAtLine, ALine);
 
   if FBuffer.TextLength <= Owner.FullRefreshSize then
-    FPrevChangeLine := 0;
+    FChangeAtLine := 0;
 
   EventParseNeeded.SetEvent;
 
@@ -4248,7 +4383,7 @@ begin
   Reset(F);
   if IOResult<>0 then exit;
   {$Pop}
-  Section:= secNone;
+  Section := secNone;
   while not EOF(F) do
     begin
       Readln(F, SItem);
@@ -4350,7 +4485,7 @@ begin
   CommentRule1.BlockType := btRangeStart;
   CommentRule1.DisplayInTree := False;
   CommentRule1.NoEndRule := False;
-  CommentRule1.CollapseFmt:= '// ...';
+  CommentRule1.CollapseFmt := '// ...';
 
   CommentRule2 := BlockRules.Add;
   CommentRule2.DisplayName := 'auto_cmt_2';
@@ -4358,7 +4493,7 @@ begin
   CommentRule2.BlockType := btRangeEnd;
   CommentRule2.DisplayInTree := False;
 
-  CommentRule1.BlockEndCond:= CommentRule2;
+  CommentRule1.BlockEndCond := CommentRule2;
 end;
 
 procedure TecSyntAnalyzer.UpdateSpecialKinds; //Alexey
@@ -4420,22 +4555,21 @@ end;
 
 function TecClientSyntAnalyzer.CheckBracketsAreClosed(
   ATokenIndexFrom, ATokenIndexTo: integer): boolean; // Alexey
-// CudaText issue #2773
+// the reason for this function: CudaText issue #2773
 var
   Token: PecSyntToken;
   iToken: integer;
   LevelRound, LevelSquare, LevelCurly: integer;
   NPosStart, NLen: integer;
-  ch: WideChar;
 begin
   LevelRound := 0;
   LevelSquare := 0;
   LevelCurly := 0;
   NLen := Length(FBuffer.FText);
 
-  for iToken := ATokenIndexFrom to ATokenIndexTo do
+  for iToken := ATokenIndexFrom to Min(GetTokenCount-1, ATokenIndexTo) do
   begin
-     if BufferInvalidated then
+     if not FBuffer.Valid then
        Exit(True);
 
      Token := Tags[iToken];
@@ -4446,8 +4580,7 @@ begin
      if NPosStart >= NLen then
        Continue;
 
-     ch := FBuffer.FText[NPosStart+1];
-     case ch of
+     case FBuffer.FText[NPosStart+1] of
        '(':
          Inc(LevelRound);
        ')':
@@ -4480,7 +4613,7 @@ begin
 
   for i := FOpenedBlocks.Count - 1 downto 0 do
   begin
-    if BufferInvalidated then
+    if not FBuffer.Valid then
     begin
       FOpenedBlocks.Clear;
       //FRanges.Clear;
@@ -4492,7 +4625,7 @@ begin
        ((AStartTagIdx = 0) or (Range.StartIdx >= AStartTagIdx)) then
      begin
        Range.EndIdx := NTagCount - 1;
-       if Range.Rule.GroupIndex = 20 then
+       if Range.Rule.GroupIndex = cIndentBasedFoldingGrpIndex then
        if Range.Rule.SyntOwner = Owner then
        begin
          // Alexey: indentation-based ranges
@@ -4508,7 +4641,7 @@ begin
              NIndentSize := TokenIndent(Token1);
              for iLine := NLine+1 to High(TokenIndexer) do // not FBuffer.Count-1, it can be bigger
              begin
-               if BufferInvalidated then
+               if not FBuffer.Valid then
                begin
                  FOpenedBlocks.Clear;
                  //FRanges.Clear;
@@ -4532,7 +4665,7 @@ begin
                        // make it nice for Python lexer: skip ending "comment" tokens
                        repeat
                          if NTokenIndex<=0 then Break;
-                         Style:= Tags[NTokenIndex].Style;
+                         Style := Tags[NTokenIndex].Style;
                          if Style=nil then Break;
                          if Style.TokenKind<>etkComment then Break;
                          Dec(NTokenIndex);
@@ -4605,7 +4738,7 @@ begin
   FTokenRules.OnChange := nil;
   FFormats.OnChange := nil;
   FSubAnalyzers.OnChange := nil;
-  TStringList(FTokenTypeNames).OnChange:= nil;
+  TStringList(FTokenTypeNames).OnChange := nil;
   FGrammaParser.OnChange := nil;
 
   FreeAndNil(FFormats);
@@ -4681,7 +4814,7 @@ begin
   N := Client.TagCount;
   for iRule := 0 to High(FBlockRules_Detecters) do
   begin
-    if Client.BufferInvalidated then Exit;
+    if not Client.Buffer.Valid then Exit;
 
     Rule := FBlockRules_Detecters[iRule];
     with Rule do
@@ -4731,7 +4864,7 @@ begin
 
     for i := 0 to FBlockRules.Count - 1 do
     begin
-      if Client.BufferInvalidated then Exit;
+      if not Client.Buffer.Valid then Exit;
 
       Rule := FBlockRules[i];
       if DisableFolding then
@@ -4811,7 +4944,6 @@ var i, N, lp: integer;
 begin
   PntStart.X := -1;
   PntStart.Y := -1;
-  Result := TecSyntToken.Create(nil, -1, -1, PntStart, PntStart);
 
   if Assigned(FOnParseToken) then
     begin
@@ -4831,22 +4963,23 @@ begin
   lp := 0;
   for i := 0 to FTokenRules.Count - 1 do
     begin
+      if not Client.Buffer.Valid then
+        Exit;
       Rule := FTokenRules[i];
       if Client.IsEnabled(Rule, OnlyGlobal) then
-        with Rule do
           begin
-            if (ColumnFrom > 0) or (ColumnTo > 0) then
+            if (Rule.ColumnFrom > 0) or (Rule.ColumnTo > 0) then
               begin
                if lp = 0 then
                  lp := Client.FBuffer.OffsetToDistanceFromLineStart(APos - 1)+1;
 
-               if (ColumnFrom > 0) and (lp < ColumnFrom) or
-                  (ColumnTo > 0) and (lp > ColumnTo) then
+               if (Rule.ColumnFrom > 0) and (lp < Rule.ColumnFrom) or
+                  (Rule.ColumnTo > 0) and (lp > Rule.ColumnTo) then
                   Continue;
               end;
-            N := Match(Source, APos);
-            if Assigned(OnMatchToken) then
-              OnMatchToken(Rule, Client, Source, APos, N);
+            N := Rule.Match(Source, APos);
+            if Assigned(Rule.OnMatchToken) then
+              Rule.OnMatchToken(Rule, Client, Source, APos, N);
             if N > 0 then
               begin
                 Client.ApplyStates(Rule);
@@ -4872,6 +5005,8 @@ begin
               end;
           end;
     end;
+
+  Result := TecSyntToken.Create(nil, -1, -1, PntStart, PntStart);
 end;
 
 procedure TecSyntAnalyzer.FormatsChanged(Sender: TCollection; Item: TSyntCollectionItem);
@@ -5276,10 +5411,7 @@ function TecSyntAnalyzer.GetSeparateBlocks: Boolean;
     for i := 0 to List.Count - 1 do
       with TRuleCollectionItem(List.Items[i]) do
         if (StatesAdd <> 0) or (StatesRemove <> 0) then
-          begin
-            Result := True;
-            Exit;
-          end;
+          Exit(True);
     Result := False;
   end;
 
@@ -5364,10 +5496,10 @@ end;
 constructor TecCodeTemplate.Create(Collection: TCollection);
 begin
   inherited;
-  FName:= '';
-  FDescription:= '';
-  FAdvanced:= False;
-  FCode:= TStringList.Create;
+  FName := '';
+  FDescription := '';
+  FAdvanced := False;
+  FCode := TStringList.Create;
 end;
 
 destructor TecCodeTemplate.Destroy;
@@ -5734,10 +5866,7 @@ var
     begin
       CollectItem := Collection.Items[i];
       if (CollectItem <> Self) and ((CollectItem as TecSubAnalyzerRule).SyntAnalyzer = AAnalyzer) then
-      begin
-       Result := True;
-       Exit;
-      end;
+        Exit(True);
     end;
     Result := False;
   end;

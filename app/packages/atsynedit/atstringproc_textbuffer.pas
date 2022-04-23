@@ -27,20 +27,20 @@ type
     FList: array of integer;
     FCount: integer;
     FLenEol: integer;
-    FLocked: boolean;
     FVersion: integer;
     FOnChange: TATStringBufferChange;
     procedure SetCount(AValue: integer);
     procedure SetupFromGenericList(L: TATGenericIntList);
   public
+    Valid: boolean;
     FText: UnicodeString;
     constructor Create; virtual;
     destructor Destroy; override;
     procedure Clear;
     procedure Setup(const AText: UnicodeString; const ALineLens: array of integer);
     procedure SetupSlow(const AText: UnicodeString);
-    procedure Lock;
-    procedure Unlock;
+    //procedure Lock;
+    //procedure Unlock;
     procedure Assign(Other: TATStringBuffer);
     function CaretToStr(constref APnt: TPoint): integer;
     function StrToCaret(APos: integer): TPoint;
@@ -56,8 +56,6 @@ type
     property Count: integer read FCount;
     property OnChange: TATStringBufferChange read FOnChange write FOnChange;
     property Version: integer read FVersion;
-    procedure IncreaseVersion;
-    property IsLocked: boolean read FLocked;
   end;
 
 implementation
@@ -66,7 +64,7 @@ implementation
 
 procedure TATStringBuffer.SetCount(AValue: integer);
 begin
-  Assert(not FLocked, 'SetCount called for locked StringBuffer');
+  //Assert(not FLocked, 'SetCount called for locked StringBuffer');
   if AValue<0 then
     raise Exception.Create('StringBuffer Count<0');
 
@@ -82,7 +80,8 @@ begin
   FCount:= 0;
   SetCount(0);
   FVersion:= 0;
-  FLocked:= false;
+  //FLocked:= false;
+  Valid:= false;
 end;
 
 destructor TATStringBuffer.Destroy;
@@ -97,10 +96,11 @@ procedure TATStringBuffer.Setup(const AText: UnicodeString;
 var
   Pos, NLen, i: integer;
 begin
-  Assert(not FLocked, 'Attempt to change locked StringBuffer');
+  //Assert(not FLocked, 'Attempt to change locked StringBuffer');
   Inc(FVersion);
   FText:= AText;
   //FLenEol:= ALenEol;
+  Valid:= false;
 
   SetCount(Length(ALineLens)+1);
   Pos:= 0;
@@ -117,7 +117,7 @@ procedure TATStringBuffer.SetupFromGenericList(L: TATGenericIntList);
 var
   Pos, NLen, i: integer;
 begin
-  Assert(not FLocked, 'Attempt to change locked StringBuffer');
+  //Assert(not FLocked, 'Attempt to change locked StringBuffer');
   Inc(FVersion);
   SetCount(L.Count+1);
   Pos:= 0;
@@ -136,10 +136,11 @@ var
   Lens: TATGenericIntList;
   i, N: integer;
 begin
-  Assert(not FLocked, 'Attempt to change locked StringBuffer');
+  //Assert(not FLocked, 'Attempt to change locked StringBuffer');
   Inc(FVersion);
 
   FText:= AText;
+  Valid:= false;
   if FText='' then
   begin
     SetCount(0);
@@ -184,6 +185,7 @@ begin
   end;
 end;
 
+{
 procedure TATStringBuffer.Lock;
 begin
   FLocked:= true;
@@ -193,6 +195,7 @@ procedure TATStringBuffer.Unlock;
 begin
   FLocked:= false;
 end;
+}
 
 procedure TATStringBuffer.Assign(Other: TATStringBuffer);
 begin
@@ -207,9 +210,10 @@ end;
 
 procedure TATStringBuffer.Clear;
 begin
-  Assert(not FLocked, 'Attempt to clear locked StringBuffer');
+  //Assert(not FLocked, 'Attempt to clear locked StringBuffer');
   FText:= '';
   SetCount(0);
+  Valid:= false;
 end;
 
 function TATStringBuffer.CaretToStr(constref APnt: TPoint): integer;
@@ -330,11 +334,6 @@ end;
 function TATStringBuffer.OffsetToOffsetOfLineEnd(APos: integer): integer; inline;
 begin
   Result:= APos+OffsetToDistanceFromLineEnd(APos);
-end;
-
-procedure TATStringBuffer.IncreaseVersion;
-begin
-  Inc(FVersion);
 end;
 
 function TATStringBuffer.OffsetToDistanceFromLineStart(APos: integer): integer;

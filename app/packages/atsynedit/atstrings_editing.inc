@@ -267,6 +267,7 @@ procedure TATStrings.TextDeleteLeft(AX, AY: integer; ALen: integer;
   out ATextChanged: boolean);
 var
   Str, StrPrev: atString;
+  bNeedGroup: boolean;
 begin
   AShift.X:= 0;
   AShift.Y:= 0;
@@ -278,7 +279,10 @@ begin
   ATextChanged:= true;
   Str:= Lines[AY];
 
-  BeginUndoGroup;
+  bNeedGroup:= true; //ALen>1; //must not create undo-group for usual BkSpace pressing (ALen=1)
+  if bNeedGroup then
+    BeginUndoGroup;
+
   try
 
     //handle spec case: caret on last fake line, BkSp pressed:
@@ -322,9 +326,11 @@ begin
       //  nil);
 
       StrPrev:= Lines[AY-1];
-      if Str<>'' then
-        Lines[AY-1]:= StrPrev+Str;
-      LineDelete(AY);
+      if StrPrev<>'' then
+        //better do changing of line AY (and delete AY-1), this will unfold block on this line
+        Lines[AY]:= StrPrev+Str;
+      LineDelete(AY-1);
+
       AShift.Y:= -1;
       APosAfter.X:= Length(StrPrev);
       APosAfter.Y:= AY-1;
@@ -333,7 +339,8 @@ begin
       ATextChanged:= false;
 
   finally
-    EndUndoGroup;
+    if bNeedGroup then
+      EndUndoGroup;
   end;
 end;
 
@@ -341,7 +348,8 @@ procedure TATStrings.TextDeleteRight(AX, AY: integer; ALen: integer; out AShift,
   APosAfter: TPoint; ACanDelEol: boolean = true);
 var
   Str: atString;
-  DelEol: boolean;
+  bDelEol: boolean;
+  bNeedGroup: boolean;
 begin
   AShift.X:= 0;
   AShift.Y:= 0;
@@ -354,10 +362,12 @@ begin
   if (AY=Count-1) and (Str='') and (LinesEnds[AY]=cEndNone) then
     Exit;
 
-  BeginUndoGroup;
-  try
+  bNeedGroup:= true; //ALen>1; //must not create undo-group for usual Delete pressing
+  if bNeedGroup then
+    BeginUndoGroup;
 
-    DelEol:= false;
+  try
+    bDelEol:= false;
     if AX<Length(Str) then
     begin
       System.Delete(Str, AX+1, ALen);
@@ -365,9 +375,9 @@ begin
       AShift.X:= -ALen;
     end
     else
-      DelEol:= ACanDelEol;
+      bDelEol:= ACanDelEol;
 
-    if DelEol then
+    if bDelEol then
       if Str='' then //handle for simpler line-states
       begin
         AShift.Y:= -1;
@@ -414,7 +424,8 @@ begin
       end;
 
   finally
-    EndUndoGroup;
+    if bNeedGroup then
+      EndUndoGroup;
   end;
 end;
 
@@ -645,6 +656,11 @@ begin
   else
   begin
     BeginUndoGroup;
+
+    if (LinesFoldFrom[AY, 0]>0) or
+      (LinesFoldFrom[AY, 1]>0) then
+      if Assigned(FOnUnfoldLine) then
+        FOnUnfoldLine(Self, AY);
 
     if AX<Length(Str) then
     begin

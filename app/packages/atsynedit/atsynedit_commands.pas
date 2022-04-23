@@ -180,12 +180,14 @@ const
 
   //first Paste command
   cCommand_Clipboard_Begin = 1000;
+
   cCommand_ClipboardPaste_Begin = 1000;
   cCommand_ClipboardPaste = 1000;
   cCommand_ClipboardPaste_Select = 1001;
   cCommand_ClipboardPaste_KeepCaret = 1002;
   cCommand_ClipboardPaste_Column = 1003 or cCmdFlag_ResetSel;
   cCommand_ClipboardPaste_ColumnKeepCaret = 1004 or cCmdFlag_ResetSel;
+  cCommand_ClipboardPasteAndIndent = 1005;
   cCommand_ClipboardCopy = 1006;
   cCommand_ClipboardCopyAdd = 1007;
   cCommand_ClipboardCut = 1008;
@@ -196,11 +198,11 @@ const
   cCommand_ClipboardAltPaste_KeepCaret = 1012;
   cCommand_ClipboardAltPaste_Column = 1013 or cCmdFlag_ResetSel;
   cCommand_ClipboardAltPaste_ColumnKeepCaret = 1014 or cCmdFlag_ResetSel;
-  //use SecondarySelection (has meaning in Linux)
-  cCommand_ClipboardAltAltPaste = 1015;
-  //last Paste command
-  cCommand_ClipboardPaste_End = 1015;
-  cCommand_Clipboard_End = 1015;
+  cCommand_ClipboardAltAltPaste = 1015; //use SecondarySelection (has meaning in Linux)
+  cCommand_ClipboardPasteFromRecents = 1016;
+  cCommand_ClipboardPaste_End = 1016; //last Paste command
+  cCommand_ClipboardClearRecents = 1017;
+  cCommand_Clipboard_End = 1017;
 
   cCommand_TextCaseLower = 1020;
   cCommand_TextCaseUpper = 1021;
@@ -270,8 +272,15 @@ implementation
 function IsCommandToUndoInOneStep(AValue: integer): boolean;
 begin
   case AValue and not cCmdFlag_ResetSel of
+    //TextInsert + BackSpace/Delete are here to fix CudaText #3972
+    cCommand_TextInsert,
+    cCommand_KeyBackspace,
+    cCommand_KeyDelete,
+
+    //"move lines up/down" were first who needed undo in single step
     cCommand_MoveSelectionUp,
     cCommand_MoveSelectionDown,
+
     cCommand_ClipboardPaste_Begin..
     cCommand_ClipboardPaste_End:
       Result:= true;

@@ -12,7 +12,7 @@ interface
 uses
   Classes, SysUtils, StrUtils,
   LCLType, LCLIntf, Clipbrd,
-  ATSynEdit_Options,
+  ATSynEdit_Globals,
   ATSynEdit_UnicodeData,
   ATSynEdit_RegExpr,
   ATSynEdit_CharSizer;
@@ -111,6 +111,7 @@ type
 
   TATStringTabHelper = class
   private
+    CharSizer: TATCharSizer;
     //these arrays are local vars, placed here to alloc 2*4Kb not in stack
     ListEnds: TATIntFixedArray;
     ListMid: TATIntFixedArray;
@@ -121,6 +122,7 @@ type
     SenderObj: TObject;
     OnCalcTabSize: TATStringTabCalcEvent;
     OnCalcLineLen: TATStringGetLenEvent;
+    constructor Create(ACharSizer: TATCharSizer);
     function CalcTabulationSize(ALineIndex, APos: integer): integer;
     function TabsToSpaces(ALineIndex: integer; const S: atString): atString;
     function TabsToSpaces_Length(ALineIndex: integer; const S: atString; AMaxLen: integer): integer;
@@ -183,6 +185,7 @@ function STrimAll(const S: UnicodeString): UnicodeString;
 function STrimLeft(const S: UnicodeString): UnicodeString;
 function STrimRight(const S: UnicodeString): UnicodeString;
 
+function SGetIndentChars(const S: string): integer;
 function SGetIndentChars(const S: atString): integer;
 function SGetIndentCharsToOpeningBracket(const S: atString): integer;
 function SGetTrailingSpaceChars(const S: atString): integer;
@@ -448,6 +451,13 @@ begin
     Result:= NAvg;
 end;
 
+function SGetIndentChars(const S: string): integer;
+begin
+  Result:= 0;
+  while (Result<Length(S)) and IsCharSpace(S[Result+1]) do
+    Inc(Result);
+end;
+
 function SGetIndentChars(const S: atString): integer;
 begin
   Result:= 0;
@@ -513,12 +523,18 @@ begin
     S[i]:= SwapEndian(S[i]);
 end;
 
+constructor TATStringTabHelper.Create(ACharSizer: TATCharSizer);
+begin
+  inherited Create;
+  CharSizer:= ACharSizer;
+end;
+
 function TATStringTabHelper.CalcTabulationSize(ALineIndex, APos: integer): integer;
 begin
   if Assigned(OnCalcTabSize) then
     Result:= OnCalcTabSize(SenderObj, ALineIndex, APos)
   else
-  if Assigned(OnCalcLineLen) and (OnCalcLineLen(ALineIndex)>ATEditorOptions.MaxLineLenForAccurateCharWidths) then
+  if Assigned(OnCalcLineLen) and (ALineIndex>=0) and (OnCalcLineLen(ALineIndex)>ATEditorOptions.MaxLineLenForAccurateCharWidths) then
     Result:= 1
   else
   if APos>ATEditorOptions.MaxTabPositionToExpand then
@@ -625,7 +641,7 @@ begin
     begin
       StrPair[1]:= ch;
       StrPair[2]:= S[i+1];
-      NPairSize:= GlobalCharSizer.GetStrWidth(StrPair);
+      NPairSize:= CharSizer.GetStrWidth(StrPair);
       NScalePercents:= NPairSize - NPairSize div 2;
     end
     }
@@ -635,7 +651,7 @@ begin
     end
     else
     begin
-      NScalePercents:= GlobalCharSizer.GetCharWidth(ch);
+      NScalePercents:= CharSizer.GetCharWidth(ch);
       //NPairSize:= 0;
     end;
 
@@ -683,7 +699,7 @@ begin
     end
     else
     begin
-      NScalePercents:= GlobalCharSizer.GetCharWidth(ch);
+      NScalePercents:= CharSizer.GetCharWidth(ch);
     end;
 
     if ch<>#9 then
@@ -1380,4 +1396,3 @@ begin
 end;
 
 end.
-

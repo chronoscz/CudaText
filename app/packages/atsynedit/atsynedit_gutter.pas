@@ -10,14 +10,16 @@ interface
 
 uses
   Classes, SysUtils,
-  ATSynEdit_Options;
+  ATSynEdit_Globals;
 
 type
   TATGutterItem = class
+  public
+    Tag: Int64;
     Visible: boolean;
-    Size: integer;
-    Left, Right: integer;
-    Scaled: boolean;
+    Size: integer; //column width in pixels
+    Scaled: boolean; //adjust column width using ATEditorScale()
+    Left, Right: integer; //these are calculated by TATGutter.Update()
   end;
 
 type
@@ -29,18 +31,20 @@ type
     FList: TFPList;
     function GetItem(N: integer): TATGutterItem;
   public
-    GutterLeft: integer;
+    GutterCoordLeft: integer;
     constructor Create; virtual;
     destructor Destroy; override;
     function IsIndexValid(N: integer): boolean; inline;
-    procedure Add(ASize: integer);
+    procedure Add(AIndex: integer; ASize: integer; ATag: Int64; AScaled, AVisible: boolean);
     procedure Delete(N: integer);
+    procedure Move(AIndexCur, AIndexNew: integer);
     procedure Clear;
     function Count: integer; inline;
     property Items[N: integer]: TATGutterItem read GetItem; default;
     function Width: integer;
     procedure Update;
-    function IndexAt(AX: integer): integer;
+    function FindIndexAtCoordX(AX: integer): integer;
+    function FindIndexByTag(ATag: Int64): integer;
   end;
 
 
@@ -74,15 +78,20 @@ begin
   inherited;
 end;
 
-procedure TATGutter.Add(ASize: integer);
+procedure TATGutter.Add(AIndex: integer; ASize: integer; ATag: Int64; AScaled,
+  AVisible: boolean);
 var
   Item: TATGutterItem;
 begin
   Item:= TATGutterItem.Create;
   Item.Size:= ASize;
-  Item.Visible:= true;
-  FList.Add(Item);
-  Update;
+  Item.Tag:= ATag;
+  Item.Scaled:= AScaled;
+  Item.Visible:= AVisible;
+  if AIndex<0 then
+    FList.Add(Item)
+  else
+    FList.Insert(AIndex, Item);
 end;
 
 procedure TATGutter.Delete(N: integer);
@@ -92,7 +101,11 @@ begin
     TObject(FList[N]).Free;
     FList.Delete(N);
   end;
-  Update;
+end;
+
+procedure TATGutter.Move(AIndexCur, AIndexNew: integer);
+begin
+  FList.Move(AIndexCur, AIndexNew);
 end;
 
 procedure TATGutter.Clear;
@@ -111,7 +124,7 @@ end;
 function TATGutter.Width: integer;
 begin
   if Count>0 then
-    Result:= Items[Count-1].Right - GutterLeft
+    Result:= Items[Count-1].Right - GutterCoordLeft
   else
     Result:= 0;
 end;
@@ -126,7 +139,7 @@ begin
       if i>0 then
         Left:= Items[i-1].Right
       else
-        Left:= GutterLeft;
+        Left:= GutterCoordLeft;
       Right:= Left;
       if Visible then
       begin
@@ -138,7 +151,7 @@ begin
     end;
 end;
 
-function TATGutter.IndexAt(AX: integer): integer;
+function TATGutter.FindIndexAtCoordX(AX: integer): integer;
 var
   i: integer;
 begin
@@ -146,11 +159,17 @@ begin
   for i:= 0 to Count-1 do
     with Items[i] do
       if (AX>=Left) and (AX<Right) then
-      begin
-        Result:= i;
-        Exit
-      end;
+        Exit(i);
+end;
+
+function TATGutter.FindIndexByTag(ATag: Int64): integer;
+var
+  i: integer;
+begin
+  Result:= -1;
+  for i:= 0 to Count-1 do
+    if Items[i].Tag=ATag then
+      Exit(i);
 end;
 
 end.
-
