@@ -162,6 +162,7 @@ apps:
     - desktop
     - x11
     - home
+    - removable-media
 
 layout:
   /usr/share/cudatext:
